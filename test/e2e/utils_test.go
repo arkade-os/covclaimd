@@ -15,7 +15,6 @@ import (
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
 
 	arklib "github.com/arkade-os/arkd/pkg/ark-lib"
-	"github.com/arkade-os/arkd/pkg/ark-lib/asset"
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
 	"github.com/arkade-os/arkd/pkg/ark-lib/offchain"
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
@@ -321,40 +320,11 @@ func sendOffChainToVHTLC(
 	require.NoError(t, c.Client().FinalizeTx(ctx, arkTxid, finalCps))
 }
 
-// sendOffChainWithExtension funds an address with a receiver while attaching
-// an arbitrary extension packet to the ark transaction's OP_RETURN.
-func sendOffChainWithExtension(
-	t *testing.T,
-	c arksdk.Wallet,
-	receiver clientTypes.Receiver,
-	pkt extension.Packet,
-) {
-	t.Helper()
-	_, err := c.SendOffChain(
-		t.Context(),
-		[]clientTypes.Receiver{receiver},
-		arksdk.WithExtension(pkt),
-	)
-	require.NoError(t, err)
-}
-
 func newEmulatorClient(t *testing.T) emulatorclient.TransportClient {
 	t.Helper()
 	conn, err := grpc.NewClient(emulatorAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	return emulatorclient.NewGRPCClient(conn)
-}
-
-func issueAsset(t *testing.T, client arksdk.Wallet, supply uint64) string {
-	t.Helper()
-	// covclaimd's pair validation looks up "decimals" metadata via the indexer,
-	// so every test asset must publish it (zero-decimal assets are fine).
-	decimalsMd, err := asset.NewMetadata("decimals", "0")
-	require.NoError(t, err)
-	_, assetIds, err := client.IssueAsset(t.Context(), supply, nil, []asset.Metadata{*decimalsMd})
-	require.NoError(t, err)
-	require.Len(t, assetIds, 1)
-	return assetIds[0].String()
 }
 
 // fetchIntroPubkey returns the emulator signer pubkey, parsed.
