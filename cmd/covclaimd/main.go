@@ -16,12 +16,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/arkade-os/arkd/pkg/client-lib/client"
+	clientgrpc "github.com/arkade-os/arkd/pkg/client-lib/client/grpc"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	indexergrpc "github.com/arkade-os/arkd/pkg/client-lib/indexer/grpc"
 	"github.com/arkade-os/covclaimd/internal/config"
 	grpcservice "github.com/arkade-os/covclaimd/internal/interface/grpc"
 	"github.com/arkade-os/covclaimd/pkg/preimage"
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
-	arksdk "github.com/arkade-os/go-sdk"
 	"github.com/arkade-os/solver/pkg/executor"
 	"github.com/arkade-os/solver/pkg/executor/arkdsource"
 )
@@ -50,19 +51,22 @@ func run() error {
 
 	log.WithField("version", Version).Info("starting covclaimd")
 
-	// Set up the arkd-backed wallet that funds and submits claim transactions.
-	wallet, err := arksdk.NewWallet(cfg.Datadir)
+	// The claimer never holds funds and never signs with its own key: it
+	// builds claim txs that spend preimage-gated VTXOs via the covenant
+	// closure and submits them to the emulator. So it only needs read/submit
+	// access to arkd (tx stream + GetInfo) and the indexer (spendable check) —
+	// no wallet, seed, or password.
+	arkClient, err := clientgrpc.NewClient(cfg.ArkURL)
 	if err != nil {
-		return fmt.Errorf("failed to create wallet: %w", err)
+		return fmt.Errorf("failed to connect to arkd: %w", err)
 	}
-	defer wallet.Stop()
+	defer arkClient.Close()
 
-	if err := wallet.Init(ctx, cfg.ArkURL, cfg.WalletSeed, cfg.WalletPassword); err != nil {
-		return fmt.Errorf("failed to init wallet: %w", err)
+	idxClient, err := indexergrpc.NewClient(cfg.ArkURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to indexer: %w", err)
 	}
-	if err := wallet.Unlock(ctx, cfg.WalletPassword); err != nil {
-		return fmt.Errorf("failed to unlock wallet: %w", err)
-	}
+	defer idxClient.Close()
 
 	// Connect to the emulator (covenant signer).
 	emulatorConn, err := grpc.NewClient(
@@ -89,12 +93,12 @@ func run() error {
 		return fmt.Errorf("parse emulator pubkey: %w", err)
 	}
 
-	info, err := wallet.Client().GetInfo(ctx)
+	info, err := arkClient.GetInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get arkd info: %w", err)
 	}
 
-	plugin, err := newPlugin(ctx, cfg, wallet.Indexer(), emulator, *info, emulatorPub)
+	plugin, err := newPlugin(ctx, cfg, idxClient, emulator, *info, emulatorPub)
 	if err != nil {
 		return fmt.Errorf("failed to setup preimage plugin: %w", err)
 	}
@@ -116,7 +120,7 @@ func run() error {
 	done := make(chan error, 1)
 	log := logrus.StandardLogger()
 	s := executor.New(plugin).WithLogger(log)
-	src := arkdsource.New(wallet.Client(), log)
+	src := arkdsource.New(arkClient, log)
 	go func() {
 		done <- s.Run(runtimeCtx, src)
 	}()

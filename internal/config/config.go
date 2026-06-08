@@ -10,37 +10,29 @@ import (
 
 // Environment variable keys (without the COVCLAIMD_ prefix, which is added by viper).
 var (
-	SecretKey      = "SECRET_KEY"
-	ArkURL         = "ARK_URL"
-	EmulatorURL    = "EMULATOR_URL"
-	GRPCPort       = "GRPC_PORT"
-	HTTPPort       = "HTTP_PORT"
-	LogLevel       = "LOG_LEVEL"
-	Datadir        = "DATADIR"
-	WalletSeed     = "WALLET_SEED"
-	WalletPassword = "WALLET_PASSWORD"
+	SecretKey   = "SECRET_KEY"
+	ArkURL      = "ARK_URL"
+	EmulatorURL = "EMULATOR_URL"
+	GRPCPort    = "GRPC_PORT"
+	HTTPPort    = "HTTP_PORT"
+	LogLevel    = "LOG_LEVEL"
 )
 
 const (
-	envPrefix              = "COVCLAIMD"
-	defaultDatadir         = ".covclaimd"
-	defaultGRPCPort        = 7070
-	defaultHTTPPort        = 7071
-	defaultLogLevel        = 4 // logrus.InfoLevel
-	defaultPreimageEnabled = true
+	envPrefix       = "COVCLAIMD"
+	defaultGRPCPort = 7070
+	defaultHTTPPort = 7071
+	defaultLogLevel = 4 // logrus.InfoLevel
 )
 
 // Config holds all configuration for the covclaimd server.
 type Config struct {
-	ArkURL         string
-	EmulatorURL    string
-	SecretKey      *btcec.PrivateKey
-	GRPCPort       int
-	HTTPPort       int
-	LogLevel       int
-	Datadir        string
-	WalletSeed     string
-	WalletPassword string
+	ArkURL      string
+	EmulatorURL string
+	SecretKey   *btcec.PrivateKey
+	GRPCPort    int
+	HTTPPort    int
+	LogLevel    int
 }
 
 func Load() (*Config, error) {
@@ -50,7 +42,6 @@ func Load() (*Config, error) {
 	viper.SetDefault(GRPCPort, defaultGRPCPort)
 	viper.SetDefault(HTTPPort, defaultHTTPPort)
 	viper.SetDefault(LogLevel, defaultLogLevel)
-	viper.SetDefault(Datadir, defaultDatadir)
 
 	arkURL := viper.GetString(ArkURL)
 	if arkURL == "" {
@@ -86,20 +77,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse to secret key")
 	}
 
-	walletPassword := viper.GetString(WalletPassword)
-	if walletPassword == "" {
-		return nil, fmt.Errorf("WALLET_PASSWORD is required")
-	}
-
 	return &Config{
-		SecretKey:      seckey,
-		ArkURL:         arkURL,
-		EmulatorURL:    emulatorURL,
-		GRPCPort:       grpcPort,
-		HTTPPort:       httpPort,
-		LogLevel:       viper.GetInt(LogLevel),
-		Datadir:        viper.GetString(Datadir),
-		WalletSeed:     viper.GetString(WalletSeed),
-		WalletPassword: walletPassword,
+		SecretKey:   seckey,
+		ArkURL:      arkURL,
+		EmulatorURL: emulatorURL,
+		GRPCPort:    grpcPort,
+		HTTPPort:    httpPort,
+		LogLevel:    viper.GetInt(LogLevel),
 	}, nil
 }

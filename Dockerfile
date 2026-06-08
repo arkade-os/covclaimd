@@ -21,9 +21,6 @@ WORKDIR /app
 COPY --from=builder /app/bin/* /app/
 
 ENV PATH="/app:${PATH}"
-ENV COVCLAIMD_DATADIR=/app/data
-
-VOLUME /app/data
 
 EXPOSE 7070 7071
 

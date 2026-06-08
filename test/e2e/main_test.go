@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/arkade-os/arkd/pkg/client-lib/client"
+	clientgrpc "github.com/arkade-os/arkd/pkg/client-lib/client/grpc"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	indexergrpc "github.com/arkade-os/arkd/pkg/client-lib/indexer/grpc"
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
-	arksdk "github.com/arkade-os/go-sdk"
-	sdktypes "github.com/arkade-os/go-sdk/types"
 	"github.com/btcsuite/btcd/btcec/v2"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -58,14 +58,6 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	covclaimdDatadir, err := os.MkdirTemp("", "covclaimd-e2e-*")
-	if err != nil {
-		log.Errorf("failed to create covclaimd datadir: %s", err)
-		return 1
-	}
-	// nolint:errcheck
-	defer os.RemoveAll(covclaimdDatadir)
-
 	secretKey, err := btcec.NewPrivateKey()
 	if err != nil {
 		log.Errorf("failed to generate covclaimd secret key: %s", err)
@@ -73,27 +65,18 @@ func runTests(m *testing.M) int {
 	}
 
 	cfg := &config.Config{
-		Datadir:        covclaimdDatadir,
-		ArkURL:         arkdURL,
-		WalletPassword: password,
-		EmulatorURL:    emulatorAddr,
-		SecretKey:      secretKey,
-		GRPCPort:       e2eGRPCPort,
-		HTTPPort:       e2eHTTPPort,
-		LogLevel:       int(log.DebugLevel),
+		ArkURL:      arkdURL,
+		EmulatorURL: emulatorAddr,
+		SecretKey:   secretKey,
+		GRPCPort:    e2eGRPCPort,
+		HTTPPort:    e2eHTTPPort,
+		LogLevel:    int(log.DebugLevel),
 	}
-
-	covclaimdWallet, err := setupCovclaimdWallet(ctx, cfg)
-	if err != nil {
-		log.Errorf("failed to setup covclaimd wallet: %s", err)
-		return 1
-	}
-	defer covclaimdWallet.Stop()
 
 	runCtx, cancelCovclaimd := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- runCovclaimd(runCtx, cfg, log.StandardLogger(), covclaimdWallet)
+		done <- runCovclaimd(runCtx, cfg, log.StandardLogger())
 	}()
 	defer func() {
 		cancelCovclaimd()
@@ -107,40 +90,15 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	if err := waitWalletSynced(ctx, covclaimdWallet); err != nil {
-		log.Errorf("failed to sync covclaimd wallet: %s", err)
-		return 1
-	}
-
-	// Fund the covclaimd with offchain BTC.
-	if err := fundWallet(ctx, covclaimdWallet); err != nil {
-		log.Errorf("failed to fund covclaimd: %s", err)
-		return 1
-	}
-
 	return m.Run()
 }
 
-// setupCovclaimdWallet builds, inits, and unlocks the bot's ark wallet on the
-// configured datadir. Mirrors cmd/covclaimd's wallet bootstrap.
-func setupCovclaimdWallet(ctx context.Context, cfg *config.Config) (arksdk.Wallet, error) {
-	wallet, err := arksdk.NewWallet(cfg.Datadir, arksdk.WithoutAutoSettle())
-	if err != nil {
-		return nil, fmt.Errorf("create wallet: %w", err)
-	}
-	if err := wallet.Init(ctx, cfg.ArkURL, cfg.WalletSeed, cfg.WalletPassword); err != nil {
-		return nil, fmt.Errorf("init wallet: %w", err)
-	}
-	if err := wallet.Unlock(ctx, cfg.WalletPassword); err != nil {
-		return nil, fmt.Errorf("unlock wallet: %w", err)
-	}
-	return wallet, nil
-}
-
-// runCovclaimd boots the gRPC/HTTP server and the covclaimd runtime against the given
-// wallet, blocking until ctx is canceled. Mirrors cmd/covclaimd's run().
+// runCovclaimd boots the gRPC/HTTP server and the covclaimd runtime, blocking
+// until ctx is canceled. Mirrors cmd/covclaimd's run(): the claimer holds no
+// funds and signs nothing, so it needs only read/submit access to arkd and the
+// indexer — no wallet.
 func runCovclaimd(
-	ctx context.Context, cfg *config.Config, logger log.FieldLogger, wallet arksdk.Wallet,
+	ctx context.Context, cfg *config.Config, logger log.FieldLogger,
 ) error {
 	emulatorConn, err := grpc.NewClient(
 		cfg.EmulatorURL, grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -165,12 +123,24 @@ func runCovclaimd(
 		return fmt.Errorf("parse emulator pubkey: %w", err)
 	}
 
-	info, err := wallet.Client().GetInfo(ctx)
+	arkClient, err := clientgrpc.NewClient(cfg.ArkURL)
+	if err != nil {
+		return fmt.Errorf("connect to arkd: %w", err)
+	}
+	defer arkClient.Close()
+
+	idxClient, err := indexergrpc.NewClient(cfg.ArkURL)
+	if err != nil {
+		return fmt.Errorf("connect to indexer: %w", err)
+	}
+	defer idxClient.Close()
+
+	info, err := arkClient.GetInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("get arkd info: %w", err)
 	}
 
-	plugin, err := buildPreimagePlugin(ctx, cfg, wallet.Indexer(), emulator, logger, *info, emulatorPub)
+	plugin, err := buildPreimagePlugin(ctx, cfg, idxClient, emulator, logger, *info, emulatorPub)
 	if err != nil {
 		return fmt.Errorf("setup preimage plugin: %w", err)
 	}
@@ -186,7 +156,7 @@ func runCovclaimd(
 	defer srv.Stop()
 
 	s := executor.New(plugin).WithLogger(logger)
-	src := arkdsource.New(wallet.Client(), logger)
+	src := arkdsource.New(arkClient, logger)
 	return s.Run(ctx, src)
 }
 
@@ -249,69 +219,6 @@ func waitCovclaimdReady(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 		}
-	}
-}
-
-func waitWalletSynced(ctx context.Context, client arksdk.Wallet) error {
-	synced := <-client.IsSynced(ctx)
-	if synced.Err != nil {
-		return fmt.Errorf("wallet sync: %w", synced.Err)
-	}
-	if !synced.Synced {
-		return fmt.Errorf("wallet failed to sync")
-	}
-	return nil
-}
-
-// fundWallet tops up the bot's offchain balance via an admin-issued note, using
-// the wallet's vtxo event channel as the wait barrier — same pattern as
-// go-sdk's test/e2e faucetOffchain.
-func fundWallet(ctx context.Context, client arksdk.Wallet) error {
-	bal, err := client.Balance(ctx)
-	if err != nil {
-		return err
-	}
-	if bal.OffchainBalance.Total >= 100000 {
-		return nil // already funded
-	}
-
-	note, err := generateNoteCtx(ctx, 200000) // 200k sats
-	if err != nil {
-		return fmt.Errorf("failed to generate note: %w", err)
-	}
-
-	vtxoCh := client.GetVtxoEventChannel(ctx)
-
-	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-waitCtx.Done():
-				return
-			case ev, ok := <-vtxoCh:
-				if !ok {
-					return
-				}
-				if ev.Type == sdktypes.VtxosAdded && len(ev.Vtxos) > 0 {
-					return
-				}
-			}
-		}
-	}()
-
-	if _, err := client.RedeemNotes(ctx, []string{note}); err != nil {
-		return fmt.Errorf("failed to redeem note: %w", err)
-	}
-
-	select {
-	case <-done:
-		return nil
-	case <-waitCtx.Done():
-		return fmt.Errorf("fundWallet: timed out waiting for VtxosAdded event")
 	}
 }
 

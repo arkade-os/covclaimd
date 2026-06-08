@@ -17,12 +17,9 @@ run: build
 	@echo "Running covclaimd against local test stack..."
 	@COVCLAIMD_ARK_URL=localhost:7070 \
 	COVCLAIMD_EMULATOR_URL=localhost:7273 \
-	COVCLAIMD_WALLET_SEED=ed1f6ad1c0aa1bbdcc14a4dc26ff5d31cca6df11617f2bbb24a4e0e6f72f7a5d \
-	COVCLAIMD_WALLET_PASSWORD=password \
+	COVCLAIMD_SECRET_KEY=ed1f6ad1c0aa1bbdcc14a4dc26ff5d31cca6df11617f2bbb24a4e0e6f72f7a5d \
 	COVCLAIMD_GRPC_PORT=7270 \
 	COVCLAIMD_HTTP_PORT=7271 \
-	COVCLAIMD_PREIMAGE_ENABLED=true \
-	COVCLAIMD_DATADIR=$${COVCLAIMD_DATADIR:-$$(mktemp -d)} \
 	./covclaimd
 
 ## build-all: cross-compile covclaimd for linux/darwin × amd64/arm64 (release artifacts)
