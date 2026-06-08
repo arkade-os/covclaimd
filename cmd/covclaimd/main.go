@@ -10,7 +10,6 @@ import (
 	"syscall"
 
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -33,7 +32,7 @@ var Version = "dev"
 
 func main() {
 	if err := run(); err != nil {
-		logrus.Error(err)
+		log.Error(err)
 		os.Exit(1)
 	}
 }
@@ -44,7 +43,7 @@ func run() error {
 		return err
 	}
 
-	log.SetLevel(logrus.Level(cfg.LogLevel))
+	log.SetLevel(log.Level(cfg.LogLevel))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -118,9 +117,9 @@ func run() error {
 	defer cancel()
 
 	done := make(chan error, 1)
-	log := logrus.StandardLogger()
-	s := executor.New(plugin).WithLogger(log)
-	src := arkdsource.New(arkClient, log)
+	logger := log.StandardLogger()
+	s := executor.New(plugin).WithLogger(logger)
+	src := arkdsource.New(arkClient, logger)
 	go func() {
 		done <- s.Run(runtimeCtx, src)
 	}()

@@ -14,11 +14,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	covclaimdv1 "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
-
-const maxRequestBodySize = 1 << 20 // 1 MB
 
 // Server manages the gRPC server and HTTP REST gateway.
 type Server struct {
@@ -84,7 +81,7 @@ func (s *Server) Start() error {
 	}
 
 	go func() {
-		logrus.Infof("HTTP gateway listening on :%d", s.httpPort)
+		log.Infof("HTTP gateway listening on :%d", s.httpPort)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.WithError(err).Error("HTTP gateway failed")
 		}
