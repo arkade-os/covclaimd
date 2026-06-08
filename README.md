@@ -1,6 +1,6 @@
 # covclaimd
 
-A claim daemon for the [Ark](https://arkade.os) protocol. `covclaimd` watches
+A claim daemon for the [Arkade](https://arkade.os) protocol. `covclaimd` watches
 the arkd transaction stream and, the moment a preimage-gated VTXO is funded,
 sweeps it on the funder's behalf — decrypting the claim credentials on the fly
 and forwarding the claim to a covenant emulator. The bot holds no funds and
