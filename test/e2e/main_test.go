@@ -140,48 +140,62 @@ func runCovclaimd(
 		return fmt.Errorf("get arkd info: %w", err)
 	}
 
-	plugin, err := buildPreimagePlugin(ctx, cfg, idxClient, emulator, logger, *info, emulatorPub)
+	claimerCfg, err := buildClaimerConfig(cfg, idxClient, emulator, *info, emulatorPub, logger)
 	if err != nil {
-		return fmt.Errorf("setup preimage plugin: %w", err)
+		return fmt.Errorf("build claimer config: %w", err)
+	}
+
+	encrypted, err := preimage.NewPlugin(ctx, claimerCfg)
+	if err != nil {
+		return fmt.Errorf("build encrypted plugin: %w", err)
+	}
+	registry := preimage.NewInMemoryRegistry()
+	reveal, err := preimage.NewRevealPlugin(claimerCfg, registry)
+	if err != nil {
+		return fmt.Errorf("build reveal plugin: %w", err)
+	}
+	recorder, err := preimage.NewRecorder(registry, cfg.SecretKey)
+	if err != nil {
+		return fmt.Errorf("build recorder: %w", err)
 	}
 
 	handler := grpcservice.NewHandler(grpcservice.PublicKeys{
 		PublicKey:         hex.EncodeToString(cfg.SecretKey.PubKey().SerializeCompressed()),
 		EmulatorPublicKey: emulatorInfo.SignerPublicKey,
 	})
-	srv := grpcservice.NewServer(cfg.GRPCPort, cfg.HTTPPort, handler)
+	revealHandler := grpcservice.NewRevealHandler(recorder)
+	srv := grpcservice.NewServer(cfg.GRPCPort, cfg.HTTPPort, handler, revealHandler)
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("start server: %w", err)
 	}
 	defer srv.Stop()
 
-	s := executor.New(plugin).WithLogger(logger)
+	s := executor.New(encrypted, reveal).WithLogger(logger)
 	src := arkdsource.New(arkClient, logger)
 	return s.Run(ctx, src)
 }
 
-func buildPreimagePlugin(
-	ctx context.Context,
+func buildClaimerConfig(
 	cfg *config.Config,
 	idx indexer.Indexer,
 	emulator emulatorclient.TransportClient,
-	logger log.FieldLogger,
 	info client.Info,
 	emulatorPub *btcec.PublicKey,
-) (executor.Plugin, error) {
+	logger log.FieldLogger,
+) (preimage.Config, error) {
 	checkpointBytes, err := hex.DecodeString(info.CheckpointTapscript)
 	if err != nil {
-		return nil, fmt.Errorf("decode checkpoint tapscript: %w", err)
+		return preimage.Config{}, fmt.Errorf("decode checkpoint tapscript: %w", err)
 	}
 	signerPubKeyBytes, err := hex.DecodeString(info.SignerPubKey)
 	if err != nil {
-		return nil, fmt.Errorf("decode signer public key: %w", err)
+		return preimage.Config{}, fmt.Errorf("decode signer public key: %w", err)
 	}
 	signerPubKey, err := btcec.ParsePubKey(signerPubKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse signer public key: %w", err)
+		return preimage.Config{}, fmt.Errorf("parse signer public key: %w", err)
 	}
-	return preimage.NewPlugin(ctx, preimage.Config{
+	return preimage.Config{
 		Indexer:             idx,
 		Emulator:            emulator,
 		SecretKey:           cfg.SecretKey,
@@ -189,7 +203,7 @@ func buildPreimagePlugin(
 		SignerPubKey:        signerPubKey,
 		CheckpointTapscript: checkpointBytes,
 		Log:                 logger,
-	})
+	}, nil
 }
 
 func waitCovclaimdReady(ctx context.Context) error {

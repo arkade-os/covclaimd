@@ -18,6 +18,7 @@ import (
 	clientgrpc "github.com/arkade-os/arkd/pkg/client-lib/client/grpc"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
 	indexergrpc "github.com/arkade-os/arkd/pkg/client-lib/indexer/grpc"
+	covclaimdv1 "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1"
 	"github.com/arkade-os/covclaimd/internal/config"
 	grpcservice "github.com/arkade-os/covclaimd/internal/interface/grpc"
 	"github.com/arkade-os/covclaimd/pkg/preimage"
@@ -97,9 +98,39 @@ func run() error {
 		return fmt.Errorf("failed to get arkd info: %w", err)
 	}
 
-	plugin, err := newPlugin(ctx, cfg, idxClient, emulator, *info, emulatorPub)
+	claimerCfg, err := buildClaimerConfig(cfg, idxClient, emulator, *info, emulatorPub)
 	if err != nil {
-		return fmt.Errorf("failed to setup preimage plugin: %w", err)
+		return fmt.Errorf("build claimer config: %w", err)
+	}
+
+	plugins := make([]executor.Plugin, 0, 2)
+	// nil unless reveal is enabled; NewServer skips registering RevealService
+	// when this is nil.
+	var revealHandler covclaimdv1.RevealServiceServer
+
+	if cfg.EncryptedEnabled {
+		encrypted, err := preimage.NewPlugin(ctx, claimerCfg)
+		if err != nil {
+			return fmt.Errorf("build encrypted plugin: %w", err)
+		}
+		plugins = append(plugins, encrypted)
+		log.Info("encrypted (Arkade extension) claim plugin enabled")
+	}
+
+	if cfg.RevealEnabled {
+		registry := preimage.NewInMemoryRegistry()
+		reveal, err := preimage.NewRevealPlugin(claimerCfg, registry)
+		if err != nil {
+			return fmt.Errorf("build reveal plugin: %w", err)
+		}
+		plugins = append(plugins, reveal)
+
+		recorder, err := preimage.NewRecorder(registry, cfg.SecretKey)
+		if err != nil {
+			return fmt.Errorf("build recorder: %w", err)
+		}
+		revealHandler = grpcservice.NewRevealHandler(recorder)
+		log.Info("reveal (direct) claim plugin enabled")
 	}
 
 	// Expose the covclaimd/emulator pubkeys over the gRPC + HTTP API.
@@ -107,7 +138,7 @@ func run() error {
 		PublicKey:         hex.EncodeToString(cfg.SecretKey.PubKey().SerializeCompressed()),
 		EmulatorPublicKey: emulatorInfo.SignerPublicKey,
 	})
-	srv := grpcservice.NewServer(cfg.GRPCPort, cfg.HTTPPort, handler)
+	srv := grpcservice.NewServer(cfg.GRPCPort, cfg.HTTPPort, handler, revealHandler)
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
@@ -118,7 +149,7 @@ func run() error {
 
 	done := make(chan error, 1)
 	logger := log.StandardLogger()
-	s := executor.New(plugin).WithLogger(logger)
+	s := executor.New(plugins...).WithLogger(logger)
 	src := arkdsource.New(arkClient, logger)
 	go func() {
 		done <- s.Run(runtimeCtx, src)
@@ -138,39 +169,32 @@ func run() error {
 	return nil
 }
 
-func newPlugin(
-	ctx context.Context,
+func buildClaimerConfig(
 	cfg *config.Config,
 	idx indexer.Indexer,
 	emulator emulatorclient.TransportClient,
 	info client.Info,
 	emulatorPub *btcec.PublicKey,
-) (executor.Plugin, error) {
+) (preimage.Config, error) {
 	checkpointBytes, err := hex.DecodeString(info.CheckpointTapscript)
 	if err != nil {
-		return nil, fmt.Errorf("decode checkpoint tapscript: %w", err)
+		return preimage.Config{}, fmt.Errorf("decode checkpoint tapscript: %w", err)
 	}
-
 	signerPubKeyBytes, err := hex.DecodeString(info.SignerPubKey)
 	if err != nil {
-		return nil, fmt.Errorf("decode signer public key: %w", err)
+		return preimage.Config{}, fmt.Errorf("decode signer public key: %w", err)
 	}
 	signerPubKey, err := btcec.ParsePubKey(signerPubKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse signer public key: %w", err)
+		return preimage.Config{}, fmt.Errorf("parse signer public key: %w", err)
 	}
-
-	plugin, err := preimage.NewPlugin(ctx, preimage.Config{
+	return preimage.Config{
 		Indexer:             idx,
 		Emulator:            emulator,
 		SecretKey:           cfg.SecretKey,
 		EmulatorPubKey:      emulatorPub,
 		SignerPubKey:        signerPubKey,
 		CheckpointTapscript: checkpointBytes,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build preimage plugin: %w", err)
-	}
-
-	return plugin, nil
+		Log:                 log.StandardLogger(),
+	}, nil
 }

@@ -10,12 +10,14 @@ import (
 
 // Environment variable keys (without the COVCLAIMD_ prefix, which is added by viper).
 var (
-	SecretKey   = "SECRET_KEY"
-	ArkURL      = "ARK_URL"
-	EmulatorURL = "EMULATOR_URL"
-	GRPCPort    = "GRPC_PORT"
-	HTTPPort    = "HTTP_PORT"
-	LogLevel    = "LOG_LEVEL"
+	SecretKey        = "SECRET_KEY"
+	ArkURL           = "ARK_URL"
+	EmulatorURL      = "EMULATOR_URL"
+	GRPCPort         = "GRPC_PORT"
+	HTTPPort         = "HTTP_PORT"
+	LogLevel         = "LOG_LEVEL"
+	EncryptedEnabled = "ENCRYPTED_ENABLED"
+	RevealEnabled    = "REVEAL_ENABLED"
 )
 
 const (
@@ -27,12 +29,14 @@ const (
 
 // Config holds all configuration for the covclaimd server.
 type Config struct {
-	ArkURL      string
-	EmulatorURL string
-	SecretKey   *btcec.PrivateKey
-	GRPCPort    int
-	HTTPPort    int
-	LogLevel    int
+	ArkURL           string
+	EmulatorURL      string
+	SecretKey        *btcec.PrivateKey
+	GRPCPort         int
+	HTTPPort         int
+	LogLevel         int
+	EncryptedEnabled bool
+	RevealEnabled    bool
 }
 
 func Load() (*Config, error) {
@@ -42,6 +46,8 @@ func Load() (*Config, error) {
 	viper.SetDefault(GRPCPort, defaultGRPCPort)
 	viper.SetDefault(HTTPPort, defaultHTTPPort)
 	viper.SetDefault(LogLevel, defaultLogLevel)
+	viper.SetDefault(EncryptedEnabled, true)
+	viper.SetDefault(RevealEnabled, false)
 
 	arkURL := viper.GetString(ArkURL)
 	if arkURL == "" {
@@ -77,12 +83,20 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse to secret key")
 	}
 
+	encryptedEnabled := viper.GetBool(EncryptedEnabled)
+	revealEnabled := viper.GetBool(RevealEnabled)
+	if !encryptedEnabled && !revealEnabled {
+		return nil, fmt.Errorf("at least one of ENCRYPTED_ENABLED or REVEAL_ENABLED must be true")
+	}
+
 	return &Config{
-		SecretKey:   seckey,
-		ArkURL:      arkURL,
-		EmulatorURL: emulatorURL,
-		GRPCPort:    grpcPort,
-		HTTPPort:    httpPort,
-		LogLevel:    viper.GetInt(LogLevel),
+		SecretKey:        seckey,
+		ArkURL:           arkURL,
+		EmulatorURL:      emulatorURL,
+		GRPCPort:         grpcPort,
+		HTTPPort:         httpPort,
+		LogLevel:         viper.GetInt(LogLevel),
+		EncryptedEnabled: encryptedEnabled,
+		RevealEnabled:    revealEnabled,
 	}, nil
 }

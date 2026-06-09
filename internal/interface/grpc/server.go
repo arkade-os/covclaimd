@@ -2,6 +2,7 @@ package grpcservice
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -23,6 +24,7 @@ type Server struct {
 	httpServer      *http.Server
 	grpcConn        *grpc.ClientConn
 	preimageHandler covclaimdv1.PreimageServiceServer
+	revealHandler   covclaimdv1.RevealServiceServer
 	grpcPort        int
 	httpPort        int
 }
@@ -31,11 +33,13 @@ type Server struct {
 func NewServer(
 	grpcPort, httpPort int,
 	hdl covclaimdv1.PreimageServiceServer,
+	revealHdl covclaimdv1.RevealServiceServer,
 ) *Server {
 	s := &Server{
 		grpcPort:        grpcPort,
 		httpPort:        httpPort,
 		preimageHandler: hdl,
+		revealHandler:   revealHdl,
 	}
 	return s
 }
@@ -51,6 +55,9 @@ func (s *Server) Start() error {
 	s.grpcServer = grpc.NewServer()
 	if s.preimageHandler != nil {
 		covclaimdv1.RegisterPreimageServiceServer(s.grpcServer, s.preimageHandler)
+	}
+	if s.revealHandler != nil {
+		covclaimdv1.RegisterRevealServiceServer(s.grpcServer, s.revealHandler)
 	}
 
 	go func() {
@@ -72,7 +79,7 @@ func (s *Server) Start() error {
 	s.grpcConn = conn
 
 	mux := http.NewServeMux()
-	gwHandler := newHTTPGateway(conn, s.preimageHandler)
+	gwHandler := newHTTPGateway(conn, s.preimageHandler, s.revealHandler)
 	mux.Handle("/v1/", gwHandler)
 
 	s.httpServer = &http.Server{
@@ -118,10 +125,14 @@ func (s *Server) Stop() {
 func newHTTPGateway(
 	_ *grpc.ClientConn,
 	preimageSvc covclaimdv1.PreimageServiceServer,
+	revealSvc covclaimdv1.RevealServiceServer,
 ) http.Handler {
 	mux := http.NewServeMux()
 	if preimageSvc != nil {
 		registerPreimageRoutes(mux, preimageSvc)
+	}
+	if revealSvc != nil {
+		registerRevealRoutes(mux, revealSvc)
 	}
 	return mux
 }
@@ -148,6 +159,44 @@ func httpError(w http.ResponseWriter, err error, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+}
+
+func registerRevealRoutes(mux *http.ServeMux, svc covclaimdv1.RevealServiceServer) {
+	mux.HandleFunc("POST /v1/reveal", func(w http.ResponseWriter, r *http.Request) {
+		// Cap the request body: a reveal payload is a few hundred bytes; 64 KB
+		// is generous and bounds memory on this public endpoint.
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+		var body struct {
+			SwapAddress string `json:"swap_address"`
+			Packet      struct {
+				Ciphertext   string `json:"ciphertext"`    // base64 (standard, padded)
+				ArkadeScript string `json:"arkade_script"` // base64 (standard, padded)
+			} `json:"packet"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		ciphertext, err := base64.StdEncoding.DecodeString(body.Packet.Ciphertext)
+		if err != nil {
+			httpError(w, fmt.Errorf("ciphertext: %w", err), http.StatusBadRequest)
+			return
+		}
+		arkadeScript, err := base64.StdEncoding.DecodeString(body.Packet.ArkadeScript)
+		if err != nil {
+			httpError(w, fmt.Errorf("arkade_script: %w", err), http.StatusBadRequest)
+			return
+		}
+		resp, err := svc.Reveal(r.Context(), &covclaimdv1.RevealRequest{
+			SwapAddress: body.SwapAddress,
+			Packet:      &covclaimdv1.ClaimPacket{Ciphertext: ciphertext, ArkadeScript: arkadeScript},
+		})
+		if err != nil {
+			httpGRPCError(w, err)
+			return
+		}
+		jsonResponse(w, resp)
+	})
 }
 
 // httpGRPCError maps gRPC status codes to HTTP status codes.

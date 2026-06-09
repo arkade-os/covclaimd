@@ -7,6 +7,8 @@ import (
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
+	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	emulatorclient "github.com/arkade-os/emulator/pkg/client"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/psbt"
@@ -59,15 +61,17 @@ func newFixture(t *testing.T) *fixture {
 	log := logrus.New()
 	log.SetLevel(logrus.PanicLevel)
 
-	p := &plugin{
-		cfg: Config{
-			SecretKey:      covclaimdPriv,
-			EmulatorPubKey: emulatorPriv.PubKey(),
-			SignerPubKey:   serverPriv.PubKey(),
-			Log:            log,
-		},
-		log: log,
-	}
+	c, err := newClaimer(Config{
+		Indexer:             stubIndexer{},
+		Emulator:            stubEmulator{},
+		SecretKey:           covclaimdPriv,
+		EmulatorPubKey:      emulatorPriv.PubKey(),
+		SignerPubKey:        serverPriv.PubKey(),
+		CheckpointTapscript: []byte{0x01},
+		Log:                 log,
+	})
+	require.NoError(t, err)
+	p := &plugin{c}
 
 	return &fixture{
 		t:             t,
@@ -225,3 +229,7 @@ func TestPluginDecode_MissingTaprootTapTree(t *testing.T) {
 	_, ok := f.plugin.decode(p, extension.Extension{pkt})
 	require.False(t, ok)
 }
+
+type stubIndexer struct{ indexer.Indexer }
+
+type stubEmulator struct{ emulatorclient.TransportClient }

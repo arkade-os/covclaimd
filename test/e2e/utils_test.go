@@ -271,11 +271,13 @@ func sendOffChainToVHTLC(
 		outputs = append(outputs, &wire.TxOut{Value: int64(change), PkScript: myPkScript})
 	}
 
-	ext, err := extension.NewExtensionFromPackets(pkt)
-	require.NoError(t, err)
-	extTxOut, err := ext.TxOut()
-	require.NoError(t, err)
-	outputs = append(outputs, extTxOut)
+	if pkt != nil {
+		ext, err := extension.NewExtensionFromPackets(pkt)
+		require.NoError(t, err)
+		extTxOut, err := ext.TxOut()
+		require.NoError(t, err)
+		outputs = append(outputs, extTxOut)
+	}
 
 	arkTx, checkpointTxs, err := offchain.BuildTxs(
 		[]offchain.VtxoInput{in}, outputs, cfgData.CheckpointExitPath(),

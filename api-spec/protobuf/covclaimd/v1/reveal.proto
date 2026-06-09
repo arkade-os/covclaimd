@@ -1,0 +1,36 @@
+syntax = "proto3";
+package covclaimd.v1;
+option go_package = "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1";
+
+import "google/api/annotations.proto";
+
+// RevealService lets a maker reveal a preimage claim directly to covclaimd
+// instead of stamping it into the funding transaction's Arkade extension.
+// covclaimd remembers the {swap_address, packet} pair, watches the arkd tx
+// stream, and claims the moment the swap address is funded.
+service RevealService {
+  // Reveal registers a claim packet for a swap address. The bot validates the
+  // packet (decrypts the preimage, checks the arkade script) and stores it;
+  // invalid submissions are rejected.
+  rpc Reveal(RevealRequest) returns (RevealResponse) {
+    option (google.api.http) = {
+      post: "/v1/reveal"
+      body: "*"
+    };
+  }
+}
+
+// ClaimPacket mirrors the Arkade-extension TLV ClaimPacket: an ECIES ciphertext
+// of the 32-byte preimage and the plaintext EnforcePayTo arkade script.
+message ClaimPacket {
+  bytes ciphertext = 1;
+  bytes arkade_script = 2;
+}
+
+message RevealRequest {
+  // bech32m Arkade address of the VHTLC funding (swap) output.
+  string swap_address = 1;
+  ClaimPacket packet = 2;
+}
+
+message RevealResponse {}

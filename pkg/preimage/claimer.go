@@ -1,0 +1,210 @@
+package preimage
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"fmt"
+
+	"github.com/arkade-os/arkd/pkg/ark-lib/script"
+	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
+	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/sirupsen/logrus"
+)
+
+// claimer holds the protocol-specific config and implements the claim path
+// shared by every plugin: decode a packet, bind it to a funding output, gate on
+// spendability, and build+submit the claim. Plugins differ only in how they
+// source the ClaimPacket for a tx.
+type claimer struct {
+	cfg Config
+	log logrus.FieldLogger
+}
+
+// validateConfig enforces the invariants every plugin needs.
+func validateConfig(cfg Config) error {
+	if cfg.Indexer == nil {
+		return fmt.Errorf("indexer client must not be nil")
+	}
+	if cfg.Emulator == nil {
+		return fmt.Errorf("emulator client must not be nil")
+	}
+	if cfg.SecretKey == nil {
+		return fmt.Errorf("covclaimd privkey must not be nil")
+	}
+	if cfg.EmulatorPubKey == nil {
+		return fmt.Errorf("emulator pubkey must not be nil")
+	}
+	if cfg.SignerPubKey == nil {
+		return fmt.Errorf("server pubkey must not be nil")
+	}
+	if len(cfg.CheckpointTapscript) == 0 {
+		return fmt.Errorf("checkpoint tapscript must not be empty")
+	}
+	return nil
+}
+
+func newClaimer(cfg Config) (*claimer, error) {
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Log == nil {
+		cfg.Log = logrus.New()
+	}
+	return &claimer{cfg: cfg, log: cfg.Log}, nil
+}
+
+// validatePacket runs the structural checks every ClaimPacket must pass: the
+// arkade script must be a well-formed EnforcePayTo and the ECIES ciphertext must
+// decrypt to a 32-byte preimage with secretKey. The cheap script check runs
+// before the expensive ECDH so junk is rejected without crypto work. Returns the
+// recovered preimage. Shared by the plugin decode path (which swallows the error
+// into a silent miss) and Recorder.Submit (which surfaces it to the maker).
+func validatePacket(secretKey *btcec.PrivateKey, pkt *ClaimPacket) ([]byte, error) {
+	if _, err := ValidateArkadeScript(pkt.ArkadeScript); err != nil {
+		return nil, fmt.Errorf("invalid arkade_script: %w", err)
+	}
+	preimg, err := Decrypt(secretKey, pkt.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt preimage: %w", err)
+	}
+	if len(preimg) != 32 {
+		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
+	}
+	return preimg, nil
+}
+
+// decodePacket recovers the preimage from a ClaimPacket, swallowing any
+// validation failure into a debug log and ok=false (a silent miss on the tx
+// stream).
+func (c *claimer) decodePacket(pkt *ClaimPacket) ([]byte, bool) {
+	preimg, err := validatePacket(c.cfg.SecretKey, pkt)
+	if err != nil {
+		c.log.WithError(err).Debug("preimage packet validation failed")
+		return nil, false
+	}
+	return preimg, true
+}
+
+// matchOutput checks whether output i of tx is the funding output for pkt: its
+// taptree must carry the (signer, expectedTweaked) claim closure and its
+// pkScript must equal the taptree's P2TR script. Returns the typed claim on a
+// match. expectedTweaked is the emulator-tweaked key for pkt.ArkadeScript,
+// passed in so callers iterating many outputs against one packet compute it
+// once.
+func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg []byte, expectedTweaked *btcec.PublicKey) (*MatchedClaim, bool) {
+	if i >= len(tx.UnsignedTx.TxOut) || i >= len(tx.Outputs) {
+		return nil, false
+	}
+	out := tx.UnsignedTx.TxOut[i]
+	po := tx.Outputs[i]
+	if len(po.TaprootTapTree) == 0 {
+		return nil, false
+	}
+
+	scripts, err := txutils.DecodeTapTree(po.TaprootTapTree)
+	if err != nil {
+		c.log.WithError(err).Debug("preimage taptree decode failed")
+		return nil, false
+	}
+	vs := &script.TapscriptsVtxoScript{}
+	if err := vs.Decode(scripts); err != nil {
+		c.log.WithError(err).Debug("preimage taptree.Decode failed")
+		return nil, false
+	}
+	if _, err := findClaimClosure(vs, c.cfg.SignerPubKey, expectedTweaked); err != nil {
+		return nil, false
+	}
+	tapKey, _, err := vs.TapTree()
+	if err != nil {
+		return nil, false
+	}
+	expectedPk, err := script.P2TRScript(tapKey)
+	if err != nil {
+		return nil, false
+	}
+	if !bytes.Equal(out.PkScript, expectedPk) {
+		return nil, false
+	}
+
+	return &MatchedClaim{
+		Outpoint: wire.OutPoint{Hash: tx.UnsignedTx.TxHash(), Index: uint32(i)},
+		Amount:   uint64(out.Value),
+		Credentials: ClaimCredentials{
+			Preimage:     preimg,
+			ArkadeScript: pkt.ArkadeScript,
+			Taptree:      scripts,
+			PkScript:     expectedPk,
+		},
+	}, true
+}
+
+// vtxoSpendable reports whether the claim's target output is still an unspent
+// vtxo according to the indexer.
+func (c *claimer) vtxoSpendable(ctx context.Context, m *MatchedClaim) (bool, error) {
+	resp, err := c.cfg.Indexer.GetVtxos(ctx,
+		indexer.WithScripts([]string{hex.EncodeToString(m.Credentials.PkScript)}),
+		indexer.WithSpendableOnly(),
+	)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Vtxos) > 0, nil
+}
+
+// gateSpendable is the shared tail of every plugin's Match: it returns the claim
+// as a matched intent only while its funding vtxo is still spendable. Both
+// plugins source a *MatchedClaim differently but gate it identically here.
+func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool) {
+	spendable, err := c.vtxoSpendable(ctx, m)
+	if err != nil {
+		c.log.WithError(err).Debug("vtxo spendable check failed")
+		return nil, false
+	}
+	if !spendable {
+		return nil, false
+	}
+	return m, true
+}
+
+func (c *claimer) claim(ctx context.Context, m *MatchedClaim) error {
+	log := c.log.WithField("outpoint", m.Outpoint.String())
+
+	log.WithField("amount", m.Amount).
+		WithField("arkade_script_hex", hex.EncodeToString(m.Credentials.ArkadeScript)).
+		WithField("pk_script_hex", hex.EncodeToString(m.Credentials.PkScript)).
+		WithField("taptree_leaves", len(m.Credentials.Taptree)).
+		WithField("preimage_len", len(m.Credentials.Preimage)).
+		Debug("preimage claim: matched, building ark tx")
+
+	arkTx, checkpoints, err := BuildClaim(
+		m, c.cfg.CheckpointTapscript, c.cfg.SignerPubKey, c.cfg.EmulatorPubKey,
+	)
+	if err != nil {
+		return err
+	}
+
+	arkTxB64, err := arkTx.B64Encode()
+	if err != nil {
+		return err
+	}
+	cpB64 := make([]string, len(checkpoints))
+	for i, cp := range checkpoints {
+		b64, err := cp.B64Encode()
+		if err != nil {
+			return err
+		}
+		cpB64[i] = b64
+	}
+
+	log.WithField("txid", arkTx.UnsignedTx.TxHash().String()).
+		WithField("tx", arkTxB64).
+		WithField("checkpoints", cpB64).
+		Debug("claim transaction built, submitting")
+
+	_, _, err = c.cfg.Emulator.SubmitTx(ctx, arkTxB64, cpB64)
+	return err
+}
