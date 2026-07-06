@@ -1,12 +1,12 @@
 module github.com/arkade-os/covclaimd
 
-go 1.26.3
+go 1.26.4
 
 require (
-	github.com/arkade-os/arkd/pkg/ark-lib v0.8.1-0.20260429091057-9246f043c4c8
+	github.com/arkade-os/arkd/pkg/ark-lib v0.8.1-0.20260706003005-0718d54b78a9
 	github.com/arkade-os/arkd/pkg/client-lib v0.0.0-20260514151440-4ecc7753e264
-	github.com/arkade-os/emulator/pkg/arkade v0.0.0-20260526192649-eac4fbc07c4c
-	github.com/arkade-os/emulator/pkg/client v0.0.0-20260526192649-eac4fbc07c4c
+	github.com/arkade-os/emulator/pkg/arkade v0.0.0-20260701134639-4e1a84f43397
+	github.com/arkade-os/emulator/pkg/client v0.0.0-20260701134639-4e1a84f43397
 	github.com/arkade-os/go-sdk v0.9.2-0.20260518112312-588477f9d618
 	github.com/arkade-os/solver v0.0.1-rc.3
 	github.com/btcsuite/btcd v0.24.3-0.20250318170759-4f4ea81776d6
@@ -19,7 +19,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.48.0
+	golang.org/x/crypto v0.53.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
@@ -88,11 +88,11 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.40.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto v0.0.0-20241118233622-e639e219e697 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
