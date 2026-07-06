@@ -41,7 +41,7 @@ services:
 
   arkd-wallet:
     restart: unless-stopped
-    image: ghcr.io/arkade-os/arkd-wallet:v0.9.6
+    image: ghcr.io/arkade-os/arkd-wallet:v0.9.12
     container_name: covclaimd-arkd-wallet
     depends_on:
       - nbxplorer
@@ -57,7 +57,7 @@ services:
         target: /app/data
 
   arkd:
-    image: ghcr.io/arkade-os/arkd:v0.9.6
+    image: ghcr.io/arkade-os/arkd:v0.9.12
     container_name: covclaimd-arkd
     restart: unless-stopped
     depends_on:
@@ -85,7 +85,7 @@ services:
         target: /app/data
 
   emulator:
-    image: ghcr.io/arkade-os/emulator:v0.0.2
+    image: ghcr.io/arkade-os/emulator:v0.0.4
     container_name: covclaimd-emulator
     restart: unless-stopped
     depends_on:
