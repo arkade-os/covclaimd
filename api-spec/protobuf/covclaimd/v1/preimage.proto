@@ -2,8 +2,6 @@ syntax = "proto3";
 package covclaimd.v1;
 option go_package = "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1";
 
-import "google/api/annotations.proto";
-
 // PreimageService exposes the bot's encryption pubkey. Clients ECIES-encrypt
 // preimage claim credentials to this key and attach the ciphertext (along with
 // the taptree) inside an Ark extension TLV packet (type 0x04). The bot picks
@@ -12,10 +10,9 @@ import "google/api/annotations.proto";
 service PreimageService {
   // GetCovclaimdPubKey returns the hex-encoded compressed secp256k1 pubkey
   // (33 bytes / 66 hex chars) that clients must use to encrypt the secret
-  // payload.
-  rpc GetCovclaimdPubKey(GetCovclaimdPubKeyRequest) returns (GetCovclaimdPubKeyResponse) {
-    option (google.api.http) = { get: "/v1/preimage/covclaimd-pubkey" };
-  }
+  // payload. Served over HTTP as GET /v1/preimage/covclaimd-pubkey by the
+  // hand-rolled gateway in internal/interface/grpc/server.go.
+  rpc GetCovclaimdPubKey(GetCovclaimdPubKeyRequest) returns (GetCovclaimdPubKeyResponse) {}
 }
 
 message GetCovclaimdPubKeyRequest {}

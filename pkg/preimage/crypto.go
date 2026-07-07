@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -24,9 +23,6 @@ const (
 	eciesHkdfInfo = "covclaimd/preimage/v1"
 )
 
-// Encrypt produces ephemeralPub(33) || nonce(12) || aead(plaintext, sharedKey).
-// The shared key is HKDF-SHA256(ECDH(ephPriv, recipient).X(), salt=ephemeralPub,
-// info="covclaimd/preimage/v1").
 func Encrypt(recipient *btcec.PublicKey, plaintext []byte) ([]byte, error) {
 	if recipient == nil {
 		return nil, errors.New("recipient pubkey must not be nil")
@@ -55,7 +51,6 @@ func Encrypt(recipient *btcec.PublicKey, plaintext []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Decrypt mirrors Encrypt; returns an error on bad blob, wrong key, or tag mismatch.
 func Decrypt(priv *btcec.PrivateKey, blob []byte) ([]byte, error) {
 	if priv == nil {
 		return nil, errors.New("priv must not be nil")
@@ -83,20 +78,14 @@ func Decrypt(priv *btcec.PrivateKey, blob []byte) ([]byte, error) {
 	return pt, nil
 }
 
-// deriveSymKey computes HKDF-SHA256 over the ECDH shared X coordinate.
-// The ephPub bytes are used both as HKDF salt and as AAD on the AEAD —
-// binding the ciphertext to the exact ephemeral pubkey transmitted.
 func deriveSymKey(priv *btcec.PrivateKey, peer *btcec.PublicKey, salt []byte) []byte {
 	shared := ecdhX(priv, peer)
-	r := hkdf.New(newSHA256, shared, salt, []byte(eciesHkdfInfo))
+	r := hkdf.New(sha256.New, shared, salt, []byte(eciesHkdfInfo))
 	out := make([]byte, 32)
 	_, _ = io.ReadFull(r, out)
 	return out
 }
 
-// ecdhX returns the X coordinate of priv*peer (ECDH shared secret) as 32
-// big-endian bytes. Implemented manually because the btcec/v2/ecdh subpackage
-// is not present in this version of btcd.
 func ecdhX(priv *btcec.PrivateKey, peer *btcec.PublicKey) []byte {
 	var jp btcec.JacobianPoint
 	peer.AsJacobian(&jp)
@@ -116,5 +105,3 @@ func newAEAD(key []byte) (cipher.AEAD, error) {
 	}
 	return cipher.NewGCM(block)
 }
-
-func newSHA256() hash.Hash { return sha256.New() }

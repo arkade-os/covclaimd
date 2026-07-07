@@ -33,7 +33,8 @@ const (
 type RevealServiceClient interface {
 	// Reveal registers a claim packet for a swap address. The bot validates the
 	// packet (decrypts the preimage, checks the arkade script) and stores it;
-	// invalid submissions are rejected.
+	// invalid submissions are rejected. Served over HTTP as POST /v1/reveal by
+	// the hand-rolled gateway in internal/interface/grpc/server.go.
 	Reveal(ctx context.Context, in *RevealRequest, opts ...grpc.CallOption) (*RevealResponse, error)
 }
 
@@ -66,7 +67,8 @@ func (c *revealServiceClient) Reveal(ctx context.Context, in *RevealRequest, opt
 type RevealServiceServer interface {
 	// Reveal registers a claim packet for a swap address. The bot validates the
 	// packet (decrypts the preimage, checks the arkade script) and stores it;
-	// invalid submissions are rejected.
+	// invalid submissions are rejected. Served over HTTP as POST /v1/reveal by
+	// the hand-rolled gateway in internal/interface/grpc/server.go.
 	Reveal(context.Context, *RevealRequest) (*RevealResponse, error)
 }
 

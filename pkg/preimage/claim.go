@@ -19,15 +19,19 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 )
 
-// MatchedClaim is the typed intent produced by the plugin's decode stage.
+type ClaimCredentials struct {
+	Preimage     []byte
+	ArkadeScript []byte
+	Taptree      []string
+	PkScript     []byte
+}
+
 type MatchedClaim struct {
 	Outpoint    wire.OutPoint
 	Amount      uint64
 	Credentials ClaimCredentials
 }
 
-// BuildClaim builds the unsigned ark tx + checkpoint(s) that spend a single
-// preimage-gated VTXO. Pure CPU.
 func BuildClaim(
 	matched *MatchedClaim,
 	checkpointTapscriptBytes []byte,
@@ -147,8 +151,6 @@ func findClaimClosure(
 	return nil, errors.New("no ConditionMultisigClosure with (serverPubKey, expectedTweaked) found in taptree")
 }
 
-// hasExactlyTwoKeys compares via x-only Schnorr serialization because closure
-// pubkeys lose Y-parity across the encode/decode boundary.
 func hasExactlyTwoKeys(pubKeys []*btcec.PublicKey, a, b *btcec.PublicKey) bool {
 	if len(pubKeys) != 2 {
 		return false

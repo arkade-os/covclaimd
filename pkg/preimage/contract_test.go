@@ -2,7 +2,9 @@ package preimage
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -15,23 +17,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fixedPub returns a deterministic public key from a hex secret. Used for
-// golden-output tests that should not change unless the script encoding does.
-func fixedPub(t *testing.T, hexSecret string) *btcec.PublicKey {
-	t.Helper()
-	raw, err := hex.DecodeString(hexSecret)
-	require.NoError(t, err)
-	priv, _ := btcec.PrivKeyFromBytes(raw)
-	return priv.PubKey()
-}
+//go:embed testdata/serialization_fixtures.json
+var serializationFixturesJSON []byte
 
-func fixedReceiver(t *testing.T) []byte {
-	t.Helper()
-	pub := fixedPub(t, strings.Repeat("01", 32))
-	pkScript, err := txscript.PayToTaprootScript(pub)
-	require.NoError(t, err)
-	require.Len(t, pkScript, 34)
-	return pkScript
+type arkadeScriptFixtures struct {
+	ArkadeScript struct {
+		Valid []struct {
+			Name             string `json:"name"`
+			Script           string `json:"script"`
+			ExpectedReceiver string `json:"expected_receiver"`
+		} `json:"valid"`
+		Invalid []struct {
+			Name          string `json:"name"`
+			Script        string `json:"script"`
+			ExpectedError string `json:"expected_error"`
+		} `json:"invalid"`
+	} `json:"arkade_script"`
 }
 
 func TestEnforcePayTo_Determinism(t *testing.T) {
@@ -64,7 +65,6 @@ func TestPreimageCondition_Shape(t *testing.T) {
 	cond, err := preimageCondition(hash)
 	require.NoError(t, err)
 
-	// Shape: OP_HASH160 OP_DATA_20 <hash[20]> OP_EQUAL = 23 bytes.
 	require.Len(t, cond, 23)
 	assert.Equal(t, byte(txscript.OP_HASH160), cond[0])
 	assert.Equal(t, byte(txscript.OP_DATA_20), cond[1])
@@ -133,73 +133,53 @@ func TestCovenantClaimClosure_Shape(t *testing.T) {
 	assert.Equal(t, expectedCondition, cmc.Condition)
 }
 
-func TestValidateArkadeScript_RoundTrip(t *testing.T) {
-	receiver := fixedReceiver(t)
-	arkadeScript, err := EnforcePayTo(receiver)
-	require.NoError(t, err)
+func TestValidateArkadeScript(t *testing.T) {
+	var f arkadeScriptFixtures
+	require.NoError(t, json.Unmarshal(serializationFixturesJSON, &f))
 
-	parsed, err := ValidateArkadeScript(arkadeScript)
-	require.NoError(t, err)
-	assert.Equal(t, receiver, parsed)
+	for _, tc := range f.ArkadeScript.Valid {
+		t.Run(tc.Name, func(t *testing.T) {
+			raw, err := hex.DecodeString(tc.Script)
+			require.NoError(t, err)
+			parsed, err := ValidateArkadeScript(raw)
+			require.NoError(t, err)
+			assert.Equal(t, tc.ExpectedReceiver, hex.EncodeToString(parsed))
+		})
+	}
+
+	for _, tc := range f.ArkadeScript.Invalid {
+		t.Run(tc.Name, func(t *testing.T) {
+			raw, err := hex.DecodeString(tc.Script)
+			require.NoError(t, err)
+			_, err = ValidateArkadeScript(raw)
+			require.ErrorContains(t, err, tc.ExpectedError)
+		})
+	}
 }
 
-func TestValidateArkadeScript_RejectsBadInput(t *testing.T) {
-	t.Run("empty script", func(t *testing.T) {
-		_, err := ValidateArkadeScript(nil)
-		assert.Error(t, err)
-	})
+func TestEnforcePayTo_MatchesFixture(t *testing.T) {
+	var f arkadeScriptFixtures
+	require.NoError(t, json.Unmarshal(serializationFixturesJSON, &f))
+	require.NotEmpty(t, f.ArkadeScript.Valid)
 
-	t.Run("no OP_DATA_32 push", func(t *testing.T) {
-		_, err := ValidateArkadeScript([]byte{txscript.OP_HASH160, txscript.OP_EQUAL})
-		assert.Error(t, err)
-	})
+	got, err := EnforcePayTo(fixedReceiver(t))
+	require.NoError(t, err)
+	assert.Equal(t, f.ArkadeScript.Valid[0].Script, hex.EncodeToString(got))
+}
 
-	t.Run("two OP_DATA_32 pushes", func(t *testing.T) {
-		var bad bytes.Buffer
-		bad.WriteByte(txscript.OP_DATA_32)
-		bad.Write(bytes.Repeat([]byte{0x01}, 32))
-		bad.WriteByte(txscript.OP_DATA_32)
-		bad.Write(bytes.Repeat([]byte{0x02}, 32))
-		_, err := ValidateArkadeScript(bad.Bytes())
-		assert.Error(t, err)
-	})
+func fixedPub(t *testing.T, hexSecret string) *btcec.PublicKey {
+	t.Helper()
+	raw, err := hex.DecodeString(hexSecret)
+	require.NoError(t, err)
+	priv, _ := btcec.PrivKeyFromBytes(raw)
+	return priv.PubKey()
+}
 
-	t.Run("right OP_DATA_32 push but other bytes differ", func(t *testing.T) {
-		good, err := EnforcePayTo(fixedReceiver(t))
-		require.NoError(t, err)
-		corrupted := append([]byte{}, good...)
-		// Flip the last byte (OP_GREATERTHANOREQUAL) — corrupting a trailing
-		// opcode can't accidentally restructure the script's tokenizer parse,
-		// so the rejection must come from the bytes-equal check, not from a
-		// secondary failure path.
-		corrupted[len(corrupted)-1] ^= 0xFF
-		_, err = ValidateArkadeScript(corrupted)
-		assert.Error(t, err)
-	})
-
-	t.Run("hand-crafted two-output script — documents v1 restriction", func(t *testing.T) {
-		// Plausible "two-output" arkade script: pin output[0] AND output[1] to
-		// the same receiver. Contains exactly one OP_DATA_32 push (so
-		// parseReceiverFromArkadeScript would succeed in isolation), but the
-		// surrounding opcodes don't match EnforcePayTo's exact byte sequence.
-		// ValidateArkadeScript must reject it.
-		receiver := fixedReceiver(t)
-		witnessProgram := receiver[2:]
-
-		b := txscript.NewScriptBuilder()
-		b.AddInt64(0)
-		b.AddOp(txscript.OP_DUP)
-		b.AddOp(arkade.OP_INSPECTOUTPUTSCRIPTPUBKEY)
-		b.AddOp(arkade.OP_1)
-		b.AddOp(arkade.OP_EQUALVERIFY)
-		b.AddData(witnessProgram)
-		b.AddOp(arkade.OP_EQUALVERIFY)
-		b.AddOp(arkade.OP_INSPECTOUTPUTVALUE)
-		b.AddInt64(1)
-		fakeTwoOutputScript, err := b.Script()
-		require.NoError(t, err)
-
-		_, err = ValidateArkadeScript(fakeTwoOutputScript)
-		assert.Error(t, err, "two-output arkade scripts must be rejected by v1")
-	})
+func fixedReceiver(t *testing.T) []byte {
+	t.Helper()
+	pub := fixedPub(t, strings.Repeat("01", 32))
+	pkScript, err := txscript.PayToTaprootScript(pub)
+	require.NoError(t, err)
+	require.Len(t, pkScript, 34)
+	return pkScript
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
 )
 
-// PacketType is the Ark extension TLV type for a preimage claim.
 const PacketType uint8 = 0x04
 
 const (
@@ -17,17 +16,8 @@ const (
 	tlvArkadeScript byte = 0x02
 )
 
-// ClaimPacket carries the per-tx data the covclaimd needs to claim a
-// preimage-gated VTXO:
-//   - Ciphertext: ECIES(covclaimdPub, 32-byte preimage)
-//   - ArkadeScript: plaintext enforcePayTo(receiverPk) bytes; needed by
-//     the emulator to evaluate the spend, and used by the plugin
-//     to validate the tap tree binding.
-//
-// The tap tree no longer rides in the packet — it travels in the
-// funding output's POutput.TaprootTapTree (BIP-371).
 type ClaimPacket struct {
-	Ciphertext   []byte
+	Ciphertext   []byte // encrypted preimage or whatever allowing the claim
 	ArkadeScript []byte
 }
 

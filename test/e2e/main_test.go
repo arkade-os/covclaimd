@@ -31,24 +31,16 @@ import (
 )
 
 const (
-	// e2eGRPCPort + e2eHTTPPort are the ports the e2e gRPC server binds to.
-	// They're separate from cmd/covclaimd's defaults (7070/7071) so a developer
-	// can run both in parallel.
 	e2eGRPCPort = 17070
 	e2eHTTPPort = 17071
 )
 
-// e2eGRPCAddr is the address tests dial to act as a real client of the bot's
-// gRPC API.
 var e2eGRPCAddr = fmt.Sprintf("localhost:%d", e2eGRPCPort)
 
 func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
 }
 
-// runTests wraps the test setup so deferred cleanups (temp dirs, DB handles,
-// service stops) actually run before the process exits — os.Exit in TestMain
-// would skip them otherwise.
 func runTests(m *testing.M) int {
 	log.SetLevel(log.DebugLevel)
 	ctx := context.Background()
@@ -93,10 +85,6 @@ func runTests(m *testing.M) int {
 	return m.Run()
 }
 
-// runCovclaimd boots the gRPC/HTTP server and the covclaimd runtime, blocking
-// until ctx is canceled. Mirrors cmd/covclaimd's run(): the claimer holds no
-// funds and signs nothing, so it needs only read/submit access to arkd and the
-// indexer — no wallet.
 func runCovclaimd(
 	ctx context.Context, cfg *config.Config, logger log.FieldLogger,
 ) error {
@@ -106,7 +94,6 @@ func runCovclaimd(
 	if err != nil {
 		return fmt.Errorf("connect to emulator: %w", err)
 	}
-	// nolint:errcheck
 	defer emulatorConn.Close()
 	emulator := emulatorclient.NewGRPCClient(emulatorConn)
 
@@ -149,21 +136,16 @@ func runCovclaimd(
 	if err != nil {
 		return fmt.Errorf("build encrypted plugin: %w", err)
 	}
-	registry := preimage.NewInMemoryRegistry()
-	reveal, err := preimage.NewRevealPlugin(claimerCfg, registry)
+	reveal, err := preimage.NewRevealPlugin(claimerCfg)
 	if err != nil {
 		return fmt.Errorf("build reveal plugin: %w", err)
-	}
-	recorder, err := preimage.NewRecorder(registry, cfg.SecretKey)
-	if err != nil {
-		return fmt.Errorf("build recorder: %w", err)
 	}
 
 	handler := grpcservice.NewHandler(grpcservice.PublicKeys{
 		PublicKey:         hex.EncodeToString(cfg.SecretKey.PubKey().SerializeCompressed()),
 		EmulatorPublicKey: emulatorInfo.SignerPublicKey,
 	})
-	revealHandler := grpcservice.NewRevealHandler(recorder)
+	revealHandler := grpcservice.NewRevealHandler(reveal)
 	srv := grpcservice.NewServer(cfg.GRPCPort, cfg.HTTPPort, handler, revealHandler)
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("start server: %w", err)
@@ -216,7 +198,6 @@ func waitCovclaimdReady(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// nolint:errcheck
 	defer conn.Close()
 	client := covclaimdv1.NewPreimageServiceClient(conn)
 

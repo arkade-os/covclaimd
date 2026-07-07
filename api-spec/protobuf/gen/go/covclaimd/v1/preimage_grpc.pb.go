@@ -34,7 +34,8 @@ const (
 type PreimageServiceClient interface {
 	// GetCovclaimdPubKey returns the hex-encoded compressed secp256k1 pubkey
 	// (33 bytes / 66 hex chars) that clients must use to encrypt the secret
-	// payload.
+	// payload. Served over HTTP as GET /v1/preimage/covclaimd-pubkey by the
+	// hand-rolled gateway in internal/interface/grpc/server.go.
 	GetCovclaimdPubKey(ctx context.Context, in *GetCovclaimdPubKeyRequest, opts ...grpc.CallOption) (*GetCovclaimdPubKeyResponse, error)
 }
 
@@ -68,7 +69,8 @@ func (c *preimageServiceClient) GetCovclaimdPubKey(ctx context.Context, in *GetC
 type PreimageServiceServer interface {
 	// GetCovclaimdPubKey returns the hex-encoded compressed secp256k1 pubkey
 	// (33 bytes / 66 hex chars) that clients must use to encrypt the secret
-	// payload.
+	// payload. Served over HTTP as GET /v1/preimage/covclaimd-pubkey by the
+	// hand-rolled gateway in internal/interface/grpc/server.go.
 	GetCovclaimdPubKey(context.Context, *GetCovclaimdPubKeyRequest) (*GetCovclaimdPubKeyResponse, error)
 }
 

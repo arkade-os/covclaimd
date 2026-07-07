@@ -11,19 +11,6 @@ import (
 	"github.com/arkade-os/covclaimd/pkg/preimage"
 )
 
-func freshP2TR(t *testing.T) []byte {
-	t.Helper()
-	priv, err := btcec.NewPrivateKey()
-	require.NoError(t, err)
-	out, err := txscript.NewScriptBuilder().
-		AddOp(txscript.OP_1).
-		AddData(priv.PubKey().SerializeCompressed()[1:]).
-		Script()
-	require.NoError(t, err)
-	require.Len(t, out, 34)
-	return out
-}
-
 func TestBuildPacket_RoundTrip(t *testing.T) {
 	covclaimd, err := btcec.NewPrivateKey()
 	require.NoError(t, err)
@@ -70,4 +57,17 @@ func TestBuildPacket_ValidatesInputs(t *testing.T) {
 		_, err := preimage.BuildPacket(make([]byte, 32), covclaimd.PubKey(), []byte{0x01})
 		assert.Error(t, err)
 	})
+}
+
+func freshP2TR(t *testing.T) []byte {
+	t.Helper()
+	priv, err := btcec.NewPrivateKey()
+	require.NoError(t, err)
+	out, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).
+		AddData(priv.PubKey().SerializeCompressed()[1:]).
+		Script()
+	require.NoError(t, err)
+	require.Len(t, out, 34)
+	return out
 }

@@ -4,90 +4,132 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 
+	arklib "github.com/arkade-os/arkd/pkg/ark-lib"
+	"github.com/arkade-os/arkd/pkg/ark-lib/script"
+	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
 	"github.com/btcsuite/btcd/btcutil/psbt"
-
-	"github.com/arkade-os/solver/pkg/executor"
 )
 
-// revealPlugin claims preimage-gated VTXOs whose ClaimPacket was revealed
-// out-of-band (via RevealService) rather than carried in the Arkade extension.
-// It rides the same arkd tx stream as the encrypted plugin, but sources packets
-// from the Registry keyed by funding-output pkScript, and removes a registration
-// once its claim succeeds.
-type revealPlugin struct {
+type RevealPlugin struct {
 	*claimer
-	reg Registry
+	mu      sync.RWMutex
+	packets map[string]ClaimPacket
 }
 
-// NewRevealPlugin builds the reveal executor.Plugin over the given Registry.
-func NewRevealPlugin(cfg Config, reg Registry) (executor.Plugin, error) {
-	if reg == nil {
-		return nil, errors.New("registry must not be nil")
-	}
+func NewRevealPlugin(cfg Config) (*RevealPlugin, error) {
 	c, err := newClaimer(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &revealPlugin{claimer: c, reg: reg}, nil
+	return &RevealPlugin{claimer: c, packets: make(map[string]ClaimPacket)}, nil
 }
 
-// Filter applies no server-side CEL filter: the reveal plugin inspects the full
-// tx stream and matches funding outputs against the registry in Match.
-func (p *revealPlugin) Filter() string {
+func (p *RevealPlugin) Submit(ctx context.Context, swapAddress string, ciphertext, arkadeScript []byte) error {
+	if len(ciphertext) == 0 {
+		return errors.New("ciphertext must not be empty")
+	}
+	if len(arkadeScript) == 0 {
+		return errors.New("arkade_script must not be empty")
+	}
+
+	addr, err := arklib.DecodeAddressV0(swapAddress)
+	if err != nil {
+		return fmt.Errorf("decode swap address: %w", err)
+	}
+	pkScript, err := script.P2TRScript(addr.VtxoTapKey)
+	if err != nil {
+		return fmt.Errorf("derive pkScript from swap address: %w", err)
+	}
+
+	pkt := ClaimPacket{Ciphertext: ciphertext, ArkadeScript: arkadeScript}
+	if _, err := validatePacket(p.cfg.SecretKey, &pkt); err != nil {
+		return err
+	}
+
+	key := hex.EncodeToString(pkScript)
+	p.mu.Lock()
+	p.packets[key] = pkt
+	p.mu.Unlock()
+
+	p.claimIfAlreadyFunded(ctx, key)
+	return nil
+}
+
+func (p *RevealPlugin) claimIfAlreadyFunded(ctx context.Context, pkScriptHex string) {
+	resp, err := p.cfg.Indexer.GetVtxos(ctx,
+		indexer.WithScripts([]string{pkScriptHex}),
+		indexer.WithSpendableOnly(),
+	)
+	if err != nil || len(resp.Vtxos) == 0 {
+		return
+	}
+	txs, err := p.cfg.Indexer.GetVirtualTxs(ctx, []string{resp.Vtxos[0].Txid})
+	if err != nil || len(txs.Txs) == 0 {
+		p.log.WithError(err).Debug("reveal: failed to fetch funding tx for already-funded swap")
+		return
+	}
+	tx, err := psbt.NewFromRawBytes(strings.NewReader(txs.Txs[0]), true)
+	if err != nil {
+		p.log.WithError(err).Debug("reveal: failed to parse funding tx")
+		return
+	}
+	if m, ok := p.Match(ctx, tx); ok {
+		p.Solve(ctx, m)
+	}
+}
+
+func (p *RevealPlugin) Filter() string {
 	return ""
 }
 
-// Match returns a claim when one of tx's outputs funds a registered swap
-// address and the funding output's taptree binds the expected claim closure,
-// and the vtxo is still spendable.
-func (p *revealPlugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
-	matched, ok := p.matchFromRegistry(ctx, tx)
+func (p *RevealPlugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
+	matched, ok := p.matchRegistered(tx)
 	if !ok {
 		return nil, false
 	}
 	return p.gateSpendable(ctx, matched)
 }
 
-// matchFromRegistry is the I/O-free core of Match: it finds the first tx output
-// registered in the Registry whose taptree binds the claim closure.
-func (p *revealPlugin) matchFromRegistry(ctx context.Context, tx *psbt.Packet) (*MatchedClaim, bool) {
-	if tx == nil || tx.UnsignedTx == nil {
-		return nil, false
-	}
-	for i, out := range tx.UnsignedTx.TxOut {
-		reg, ok := p.reg.Lookup(ctx, hex.EncodeToString(out.PkScript))
-		if !ok {
-			continue
-		}
-		preimg, ok := p.decodePacket(&reg.Packet)
-		if !ok {
-			continue
-		}
-		expectedTweaked := emulatorTweakedKey(reg.Packet.ArkadeScript, p.cfg.EmulatorPubKey)
-		if m, ok := p.matchOutput(tx, i, &reg.Packet, preimg, expectedTweaked); ok {
-			return m, true
-		}
-	}
-	return nil, false
-}
-
-// Solve builds and submits the claim, then removes the registration so the bot
-// stops watching for it. On claim failure the registration is kept for retry on
-// a later streamed tx; the retry is bounded by Match's vtxoSpendable gate, which
-// stops re-attempting once the vtxo is no longer spendable (e.g. already claimed).
-func (p *revealPlugin) Solve(ctx context.Context, intent any) {
+func (p *RevealPlugin) Solve(ctx context.Context, intent any) {
 	matched, ok := intent.(*MatchedClaim)
 	if !ok {
 		return
 	}
+	key := hex.EncodeToString(matched.Credentials.PkScript)
 	if err := p.claim(ctx, matched); err != nil {
 		p.log.WithError(err).
-			WithField("pk_script_hex", hex.EncodeToString(matched.Credentials.PkScript)).
+			WithField("pk_script_hex", key).
 			Error("reveal claim failed, keeping registration for retry")
 		return
 	}
-	if err := p.reg.Remove(ctx, hex.EncodeToString(matched.Credentials.PkScript)); err != nil {
-		p.log.WithError(err).Warn("failed to remove registration after successful claim")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.packets, key)
+}
+
+func (p *RevealPlugin) matchRegistered(tx *psbt.Packet) (*MatchedClaim, bool) {
+	if tx == nil || tx.UnsignedTx == nil {
+		return nil, false
 	}
+	for i, out := range tx.UnsignedTx.TxOut {
+		p.mu.RLock()
+		pkt, ok := p.packets[hex.EncodeToString(out.PkScript)]
+		p.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		preimg, ok := p.decodePacket(&pkt)
+		if !ok {
+			continue
+		}
+		expectedTweaked := emulatorTweakedKey(pkt.ArkadeScript, p.cfg.EmulatorPubKey)
+		if m, ok := p.matchOutput(tx, i, &pkt, preimg, expectedTweaked); ok {
+			return m, true
+		}
+	}
+	return nil, false
 }

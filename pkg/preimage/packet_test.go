@@ -1,6 +1,9 @@
 package preimage_test
 
 import (
+	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
@@ -10,45 +13,77 @@ import (
 	"github.com/arkade-os/covclaimd/pkg/preimage"
 )
 
-func TestClaimPacket_RoundTrip(t *testing.T) {
-	in := preimage.ClaimPacket{
-		Ciphertext:   []byte{0xde, 0xad, 0xbe, 0xef},
-		ArkadeScript: []byte{0x51, 0x20, 0xaa, 0xbb, 0xcc},
+//go:embed testdata/serialization_fixtures.json
+var fixturesJSON []byte
+
+type claimPacketFixtures struct {
+	ClaimPacket struct {
+		Valid []struct {
+			Name               string `json:"name"`
+			Ciphertext         string `json:"ciphertext"`
+			ArkadeScript       string `json:"arkade_script"`
+			ExpectedSerialized string `json:"expected_serialized"`
+		} `json:"valid"`
+		InvalidSerialize []struct {
+			Name          string `json:"name"`
+			Ciphertext    string `json:"ciphertext"`
+			ArkadeScript  string `json:"arkade_script"`
+			ExpectedError string `json:"expected_error"`
+		} `json:"invalid_serialize"`
+		InvalidDeserialize []struct {
+			Name          string `json:"name"`
+			Data          string `json:"data"`
+			ExpectedError string `json:"expected_error"`
+		} `json:"invalid_deserialize"`
+	} `json:"claim_packet"`
+}
+
+func TestClaimPacket_Serialize(t *testing.T) {
+	f := loadClaimPacketFixtures(t)
+
+	for _, tc := range f.ClaimPacket.Valid {
+		t.Run(tc.Name, func(t *testing.T) {
+			pkt := preimage.ClaimPacket{
+				Ciphertext:   fromHex(t, tc.Ciphertext),
+				ArkadeScript: fromHex(t, tc.ArkadeScript),
+			}
+			raw, err := pkt.Serialize()
+			require.NoError(t, err)
+			assert.Equal(t, tc.ExpectedSerialized, hex.EncodeToString(raw))
+
+			out, err := preimage.DeserializeClaim(raw)
+			require.NoError(t, err)
+			assert.Equal(t, pkt.Ciphertext, out.Ciphertext)
+			assert.Equal(t, pkt.ArkadeScript, out.ArkadeScript)
+		})
 	}
-	raw, err := in.Serialize()
-	require.NoError(t, err)
-	out, err := preimage.DeserializeClaim(raw)
-	require.NoError(t, err)
-	assert.Equal(t, in.Ciphertext, out.Ciphertext)
-	assert.Equal(t, in.ArkadeScript, out.ArkadeScript)
+
+	for _, tc := range f.ClaimPacket.InvalidSerialize {
+		t.Run(tc.Name, func(t *testing.T) {
+			pkt := preimage.ClaimPacket{
+				Ciphertext:   fromHex(t, tc.Ciphertext),
+				ArkadeScript: fromHex(t, tc.ArkadeScript),
+			}
+			_, err := pkt.Serialize()
+			require.ErrorContains(t, err, tc.ExpectedError)
+		})
+	}
+}
+
+func TestDeserializeClaim(t *testing.T) {
+	f := loadClaimPacketFixtures(t)
+
+	for _, tc := range f.ClaimPacket.InvalidDeserialize {
+		t.Run(tc.Name, func(t *testing.T) {
+			_, err := preimage.DeserializeClaim(fromHex(t, tc.Data))
+			require.ErrorContains(t, err, tc.ExpectedError)
+		})
+	}
 }
 
 func TestClaimPacket_Type(t *testing.T) {
 	p := preimage.ClaimPacket{}
 	assert.Equal(t, uint8(0x04), p.Type())
-}
-
-func TestDeserializeClaim_Truncated(t *testing.T) {
-	_, err := preimage.DeserializeClaim([]byte{0x01, 0x00})
-	require.Error(t, err)
-}
-
-func TestDeserializeClaim_MissingArkadeScript(t *testing.T) {
-	in := preimage.ClaimPacket{Ciphertext: []byte{0xaa}}
-	raw, err := in.Serialize()
-	if err == nil {
-		_, err = preimage.DeserializeClaim(raw)
-	}
-	require.Error(t, err)
-}
-
-func TestDeserializeClaim_MissingCiphertext(t *testing.T) {
-	in := preimage.ClaimPacket{ArkadeScript: []byte{0x51}}
-	raw, err := in.Serialize()
-	if err == nil {
-		_, err = preimage.DeserializeClaim(raw)
-	}
-	require.Error(t, err)
 }
 
 func TestFindClaim_Found(t *testing.T) {
@@ -72,4 +107,18 @@ func TestFindClaim_NotFound(t *testing.T) {
 	found, err := preimage.FindClaim(ext)
 	require.NoError(t, err)
 	require.Nil(t, found)
+}
+
+func loadClaimPacketFixtures(t *testing.T) claimPacketFixtures {
+	t.Helper()
+	var f claimPacketFixtures
+	require.NoError(t, json.Unmarshal(fixturesJSON, &f))
+	return f
+}
+
+func fromHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	require.NoError(t, err)
+	return b
 }

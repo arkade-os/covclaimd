@@ -15,36 +15,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// claimer holds the protocol-specific config and implements the claim path
-// shared by every plugin: decode a packet, bind it to a funding output, gate on
-// spendability, and build+submit the claim. Plugins differ only in how they
-// source the ClaimPacket for a tx.
 type claimer struct {
 	cfg Config
 	log logrus.FieldLogger
-}
-
-// validateConfig enforces the invariants every plugin needs.
-func validateConfig(cfg Config) error {
-	if cfg.Indexer == nil {
-		return fmt.Errorf("indexer client must not be nil")
-	}
-	if cfg.Emulator == nil {
-		return fmt.Errorf("emulator client must not be nil")
-	}
-	if cfg.SecretKey == nil {
-		return fmt.Errorf("covclaimd privkey must not be nil")
-	}
-	if cfg.EmulatorPubKey == nil {
-		return fmt.Errorf("emulator pubkey must not be nil")
-	}
-	if cfg.SignerPubKey == nil {
-		return fmt.Errorf("server pubkey must not be nil")
-	}
-	if len(cfg.CheckpointTapscript) == 0 {
-		return fmt.Errorf("checkpoint tapscript must not be empty")
-	}
-	return nil
 }
 
 func newClaimer(cfg Config) (*claimer, error) {
@@ -57,29 +30,6 @@ func newClaimer(cfg Config) (*claimer, error) {
 	return &claimer{cfg: cfg, log: cfg.Log}, nil
 }
 
-// validatePacket runs the structural checks every ClaimPacket must pass: the
-// arkade script must be a well-formed EnforcePayTo and the ECIES ciphertext must
-// decrypt to a 32-byte preimage with secretKey. The cheap script check runs
-// before the expensive ECDH so junk is rejected without crypto work. Returns the
-// recovered preimage. Shared by the plugin decode path (which swallows the error
-// into a silent miss) and Recorder.Submit (which surfaces it to the maker).
-func validatePacket(secretKey *btcec.PrivateKey, pkt *ClaimPacket) ([]byte, error) {
-	if _, err := ValidateArkadeScript(pkt.ArkadeScript); err != nil {
-		return nil, fmt.Errorf("invalid arkade_script: %w", err)
-	}
-	preimg, err := Decrypt(secretKey, pkt.Ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt preimage: %w", err)
-	}
-	if len(preimg) != 32 {
-		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
-	}
-	return preimg, nil
-}
-
-// decodePacket recovers the preimage from a ClaimPacket, swallowing any
-// validation failure into a debug log and ok=false (a silent miss on the tx
-// stream).
 func (c *claimer) decodePacket(pkt *ClaimPacket) ([]byte, bool) {
 	preimg, err := validatePacket(c.cfg.SecretKey, pkt)
 	if err != nil {
@@ -89,12 +39,6 @@ func (c *claimer) decodePacket(pkt *ClaimPacket) ([]byte, bool) {
 	return preimg, true
 }
 
-// matchOutput checks whether output i of tx is the funding output for pkt: its
-// taptree must carry the (signer, expectedTweaked) claim closure and its
-// pkScript must equal the taptree's P2TR script. Returns the typed claim on a
-// match. expectedTweaked is the emulator-tweaked key for pkt.ArkadeScript,
-// passed in so callers iterating many outputs against one packet compute it
-// once.
 func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg []byte, expectedTweaked *btcec.PublicKey) (*MatchedClaim, bool) {
 	if i >= len(tx.UnsignedTx.TxOut) || i >= len(tx.Outputs) {
 		return nil, false
@@ -142,29 +86,16 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 	}, true
 }
 
-// vtxoSpendable reports whether the claim's target output is still an unspent
-// vtxo according to the indexer.
-func (c *claimer) vtxoSpendable(ctx context.Context, m *MatchedClaim) (bool, error) {
+func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool) {
 	resp, err := c.cfg.Indexer.GetVtxos(ctx,
 		indexer.WithScripts([]string{hex.EncodeToString(m.Credentials.PkScript)}),
 		indexer.WithSpendableOnly(),
 	)
 	if err != nil {
-		return false, err
-	}
-	return len(resp.Vtxos) > 0, nil
-}
-
-// gateSpendable is the shared tail of every plugin's Match: it returns the claim
-// as a matched intent only while its funding vtxo is still spendable. Both
-// plugins source a *MatchedClaim differently but gate it identically here.
-func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool) {
-	spendable, err := c.vtxoSpendable(ctx, m)
-	if err != nil {
 		c.log.WithError(err).Debug("vtxo spendable check failed")
 		return nil, false
 	}
-	if !spendable {
+	if len(resp.Vtxos) == 0 {
 		return nil, false
 	}
 	return m, true
@@ -207,4 +138,40 @@ func (c *claimer) claim(ctx context.Context, m *MatchedClaim) error {
 
 	_, _, err = c.cfg.Emulator.SubmitTx(ctx, arkTxB64, cpB64)
 	return err
+}
+
+func validateConfig(cfg Config) error {
+	if cfg.Indexer == nil {
+		return fmt.Errorf("indexer client must not be nil")
+	}
+	if cfg.Emulator == nil {
+		return fmt.Errorf("emulator client must not be nil")
+	}
+	if cfg.SecretKey == nil {
+		return fmt.Errorf("covclaimd privkey must not be nil")
+	}
+	if cfg.EmulatorPubKey == nil {
+		return fmt.Errorf("emulator pubkey must not be nil")
+	}
+	if cfg.SignerPubKey == nil {
+		return fmt.Errorf("server pubkey must not be nil")
+	}
+	if len(cfg.CheckpointTapscript) == 0 {
+		return fmt.Errorf("checkpoint tapscript must not be empty")
+	}
+	return nil
+}
+
+func validatePacket(secretKey *btcec.PrivateKey, pkt *ClaimPacket) ([]byte, error) {
+	if _, err := ValidateArkadeScript(pkt.ArkadeScript); err != nil {
+		return nil, fmt.Errorf("invalid arkade_script: %w", err)
+	}
+	preimg, err := Decrypt(secretKey, pkt.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt preimage: %w", err)
+	}
+	if len(preimg) != 32 {
+		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
+	}
+	return preimg, nil
 }

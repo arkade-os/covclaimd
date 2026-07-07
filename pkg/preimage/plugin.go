@@ -14,20 +14,15 @@ import (
 )
 
 type Config struct {
-	Indexer  indexer.Indexer
-	Emulator emulatorclient.TransportClient
-	// The secret key used to encrypt and decrypt the packet data encoding the preimage to reveal
-	SecretKey *btcec.PrivateKey
-
+	Indexer             indexer.Indexer
+	Emulator            emulatorclient.TransportClient
+	SecretKey           *btcec.PrivateKey
 	EmulatorPubKey      *btcec.PublicKey
 	SignerPubKey        *btcec.PublicKey
 	CheckpointTapscript []byte
 	Log                 logrus.FieldLogger
 }
 
-// NewPlugin builds the encrypted (Arkade extension) preimage executor.Plugin.
-// Match decodes a claim from the tx's Arkade extension and gates it on vtxo
-// spendability; Solve builds and submits the claim transaction.
 func NewPlugin(_ context.Context, cfg Config) (executor.Plugin, error) {
 	c, err := newClaimer(cfg)
 	if err != nil {
@@ -40,12 +35,8 @@ type plugin struct {
 	*claimer
 }
 
-// Filter applies no server-side CEL filter: the preimage plugin inspects the
-// full tx stream and decides structurally in Match.
 func (p *plugin) Filter() string { return "" }
 
-// Match decodes a preimage claim from tx's Arkade extension and confirms the
-// funded vtxo is still spendable. Every non-claim tx is a silent miss.
 func (p *plugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
 	if tx == nil || tx.UnsignedTx == nil {
 		return nil, false
@@ -66,7 +57,6 @@ func (p *plugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
 	return p.gateSpendable(ctx, claim)
 }
 
-// Solve builds and submits the claim transaction for a matched intent.
 func (p *plugin) Solve(ctx context.Context, intent any) {
 	claim, ok := intent.(*MatchedClaim)
 	if !ok {
@@ -77,9 +67,6 @@ func (p *plugin) Solve(ctx context.Context, intent any) {
 	}
 }
 
-// decode extracts a preimage claim from the parsed extension and the matching
-// tx output. It returns ok=false (a silent miss) whenever the tx is not a
-// well-formed claim addressed to this covclaimd.
 func (p *plugin) decode(tx *psbt.Packet, ext extension.Extension) (*MatchedClaim, bool) {
 	pkt, err := FindClaim(ext)
 	if err != nil {

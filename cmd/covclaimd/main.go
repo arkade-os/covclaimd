@@ -27,8 +27,6 @@ import (
 	"github.com/arkade-os/solver/pkg/executor/arkdsource"
 )
 
-// Version is injected at build time via -ldflags "-X main.Version=<tag>".
-// Defaults to "dev" for local builds.
 var Version = "dev"
 
 func main() {
@@ -51,11 +49,6 @@ func run() error {
 
 	log.WithField("version", Version).Info("starting covclaimd")
 
-	// The claimer never holds funds and never signs with its own key: it
-	// builds claim txs that spend preimage-gated VTXOs via the covenant
-	// closure and submits them to the emulator. So it only needs read/submit
-	// access to arkd (tx stream + GetInfo) and the indexer (spendable check) —
-	// no wallet, seed, or password.
 	arkClient, err := clientgrpc.NewClient(cfg.ArkURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to arkd: %w", err)
@@ -68,7 +61,6 @@ func run() error {
 	}
 	defer idxClient.Close()
 
-	// Connect to the emulator (covenant signer).
 	emulatorConn, err := grpc.NewClient(
 		cfg.EmulatorURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -104,8 +96,6 @@ func run() error {
 	}
 
 	plugins := make([]executor.Plugin, 0, 2)
-	// nil unless reveal is enabled; NewServer skips registering RevealService
-	// when this is nil.
 	var revealHandler covclaimdv1.RevealServiceServer
 
 	if cfg.EncryptedEnabled {
@@ -118,22 +108,15 @@ func run() error {
 	}
 
 	if cfg.RevealEnabled {
-		registry := preimage.NewInMemoryRegistry()
-		reveal, err := preimage.NewRevealPlugin(claimerCfg, registry)
+		reveal, err := preimage.NewRevealPlugin(claimerCfg)
 		if err != nil {
 			return fmt.Errorf("build reveal plugin: %w", err)
 		}
 		plugins = append(plugins, reveal)
-
-		recorder, err := preimage.NewRecorder(registry, cfg.SecretKey)
-		if err != nil {
-			return fmt.Errorf("build recorder: %w", err)
-		}
-		revealHandler = grpcservice.NewRevealHandler(recorder)
+		revealHandler = grpcservice.NewRevealHandler(reveal)
 		log.Info("reveal (direct) claim plugin enabled")
 	}
 
-	// Expose the covclaimd/emulator pubkeys over the gRPC + HTTP API.
 	handler := grpcservice.NewHandler(grpcservice.PublicKeys{
 		PublicKey:         hex.EncodeToString(cfg.SecretKey.PubKey().SerializeCompressed()),
 		EmulatorPublicKey: emulatorInfo.SignerPublicKey,
@@ -144,25 +127,11 @@ func run() error {
 	}
 	defer srv.Stop()
 
-	runtimeCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	done := make(chan error, 1)
 	logger := log.StandardLogger()
 	s := executor.New(plugins...).WithLogger(logger)
 	src := arkdsource.New(arkClient, logger)
-	go func() {
-		done <- s.Run(runtimeCtx, src)
-	}()
-
-	select {
-	case <-ctx.Done():
-		cancel()
-		<-done
-	case err := <-done:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return fmt.Errorf("runtime exited unexpectedly: %w", err)
-		}
+	if err := s.Run(ctx, src); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("runtime exited unexpectedly: %w", err)
 	}
 
 	log.Info("covclaimd stopped")

@@ -8,10 +8,6 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 
-// BuildPacket returns the extension.Packet the funder must attach to
-// the funding transaction (via clientlib.WithExtraPacket or equivalent).
-// It encrypts the preimage to covclaimdPubKey and inlines the arkade script
-// derived from receiverPkScript.
 func BuildPacket(
 	preimage []byte,
 	covclaimdPubKey *btcec.PublicKey,

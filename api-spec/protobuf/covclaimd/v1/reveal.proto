@@ -2,8 +2,6 @@ syntax = "proto3";
 package covclaimd.v1;
 option go_package = "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1";
 
-import "google/api/annotations.proto";
-
 // RevealService lets a maker reveal a preimage claim directly to covclaimd
 // instead of stamping it into the funding transaction's Arkade extension.
 // covclaimd remembers the {swap_address, packet} pair, watches the arkd tx
@@ -11,13 +9,9 @@ import "google/api/annotations.proto";
 service RevealService {
   // Reveal registers a claim packet for a swap address. The bot validates the
   // packet (decrypts the preimage, checks the arkade script) and stores it;
-  // invalid submissions are rejected.
-  rpc Reveal(RevealRequest) returns (RevealResponse) {
-    option (google.api.http) = {
-      post: "/v1/reveal"
-      body: "*"
-    };
-  }
+  // invalid submissions are rejected. Served over HTTP as POST /v1/reveal by
+  // the hand-rolled gateway in internal/interface/grpc/server.go.
+  rpc Reveal(RevealRequest) returns (RevealResponse) {}
 }
 
 // ClaimPacket mirrors the Arkade-extension TLV ClaimPacket: an ECIES ciphertext

@@ -23,28 +23,6 @@ import (
 	"github.com/arkade-os/covclaimd/pkg/preimage"
 )
 
-func dialPreimageClient(t *testing.T) covclaimdv1.PreimageServiceClient {
-	t.Helper()
-	conn, err := grpc.NewClient(e2eGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	return covclaimdv1.NewPreimageServiceClient(conn)
-}
-
-func fetchCovclaimdPubKey(t *testing.T, client covclaimdv1.PreimageServiceClient) *btcec.PublicKey {
-	t.Helper()
-	resp, err := client.GetCovclaimdPubKey(t.Context(), &covclaimdv1.GetCovclaimdPubKeyRequest{})
-	require.NoError(t, err)
-	raw, err := hex.DecodeString(resp.CovclaimdPubKey)
-	require.NoError(t, err)
-	pub, err := btcec.ParsePubKey(raw)
-	require.NoError(t, err)
-	return pub
-}
-
-// TestPreimageFundAndClaim: maker funds a VHTLC at claimAddr with a valid
-// preimage packet. The preimage bot must observe the funding tx, claim by
-// revealing the preimage, and pay receiverPk.
 func TestPreimageFundAndClaim(t *testing.T) {
 	ctx := t.Context()
 
@@ -70,19 +48,12 @@ func TestPreimageFundAndClaim(t *testing.T) {
 
 	const amount uint64 = 10_000
 
-	// sendOffChainToVHTLC builds + finalizes the funding tx synchronously
-	// via Client().SubmitTx + FinalizeTx, so after it returns the swap
-	// VTXO is observable on arkd. No need to subscribe to maker events:
-	// the maker is the SENDER, not the receiver.
 	sendOffChainToVHTLC(t, maker, claimAddr, amount, encodedTapTree, claimPacket)
 
 	v := pollForVtxoAt(t, ctx, maker.Indexer(), receiverPk, 30*time.Second)
 	require.Equal(t, amount, v.Amount, "receiver should be paid the full input value")
 }
 
-// TestPreimageInvalidArkadeScript: same setup as above but the arkade_script
-// in the packet is tampered. The bot must NOT claim — the receiver pkScript
-// must remain empty after a grace period.
 func TestPreimageInvalidArkadeScript(t *testing.T) {
 	ctx := t.Context()
 
@@ -106,9 +77,6 @@ func TestPreimageInvalidArkadeScript(t *testing.T) {
 		cfgData.SignerPubKey, emulatorPub, cfgData.Network,
 	)
 
-	// The new packet shape carries the arkade_script in plaintext, so
-	// "invalid arkade script" testing is a plaintext swap — no
-	// re-encryption needed.
 	body, err := claimPacket.Serialize()
 	require.NoError(t, err)
 	pkt, err := preimage.DeserializeClaim(body)
@@ -121,10 +89,28 @@ func TestPreimageInvalidArkadeScript(t *testing.T) {
 
 	sendOffChainToVHTLC(t, maker, claimAddr, amount, encodedTapTree, tamperedPacket)
 
-	// Grace period: give the bot enough time to attempt + fail a claim.
 	time.Sleep(15 * time.Second)
 	require.Empty(t, vtxosForScript(t, ctx, maker, receiverPk),
 		"tampered arkade script must not result in a claim")
+}
+
+func dialPreimageClient(t *testing.T) covclaimdv1.PreimageServiceClient {
+	t.Helper()
+	conn, err := grpc.NewClient(e2eGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return covclaimdv1.NewPreimageServiceClient(conn)
+}
+
+func fetchCovclaimdPubKey(t *testing.T, client covclaimdv1.PreimageServiceClient) *btcec.PublicKey {
+	t.Helper()
+	resp, err := client.GetCovclaimdPubKey(t.Context(), &covclaimdv1.GetCovclaimdPubKeyRequest{})
+	require.NoError(t, err)
+	raw, err := hex.DecodeString(resp.CovclaimdPubKey)
+	require.NoError(t, err)
+	pub, err := btcec.ParsePubKey(raw)
+	require.NoError(t, err)
+	return pub
 }
 
 func buildPreimageVTXO(

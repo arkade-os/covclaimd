@@ -10,33 +10,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 )
 
-// p2trWitnessProgram returns the 32-byte taproot witness program from a
-// 34-byte P2TR pkScript. Returns an error if the script does not match
-// `OP_1 OP_DATA_32 <key>`.
-func p2trWitnessProgram(pkScript []byte) ([]byte, error) {
-	if len(pkScript) != 34 {
-		return nil, fmt.Errorf("expected 34-byte P2TR pkScript, got %d", len(pkScript))
-	}
-	if pkScript[0] != txscript.OP_1 || pkScript[1] != txscript.OP_DATA_32 {
-		return nil, fmt.Errorf("not a P2TR script: prefix %02x %02x", pkScript[0], pkScript[1])
-	}
-	return pkScript[2:], nil
-}
-
-// EnforcePayTo assembles the arkade enforcement script the emulator
-// evaluates for an HTLC claim input before signing. The script self-derives
-// the output index from OP_PUSHCURRENTINPUTINDEX, pinning output[i] to
-// receiverPkScript with output[i].value >= input[i].value.
-//
-// Witness arg: none. Layout (mirrors emulator/test/htlc_test.go:376-395):
-//
-//	OP_PUSHCURRENTINPUTINDEX OP_DUP
-//	OP_INSPECTOUTPUTSCRIPTPUBKEY
-//	OP_1 OP_EQUALVERIFY
-//	<receiverWitnessProgram> OP_EQUALVERIFY
-//	OP_INSPECTOUTPUTVALUE
-//	OP_PUSHCURRENTINPUTINDEX OP_INSPECTINPUTVALUE
-//	OP_GREATERTHANOREQUAL
 func EnforcePayTo(receiverPkScript []byte) ([]byte, error) {
 	witnessProgram, err := p2trWitnessProgram(receiverPkScript)
 	if err != nil {
@@ -58,30 +31,6 @@ func EnforcePayTo(receiverPkScript []byte) ([]byte, error) {
 	return b.Script()
 }
 
-// preimageCondition returns OP_HASH160 <preimageHash> OP_EQUAL — the script
-// the ConditionMultisigClosure runs against the witness preimage.
-func preimageCondition(preimageHash []byte) ([]byte, error) {
-	if len(preimageHash) != 20 {
-		return nil, fmt.Errorf("expected 20-byte HASH160, got %d", len(preimageHash))
-	}
-	return txscript.NewScriptBuilder().
-		AddOp(txscript.OP_HASH160).
-		AddData(preimageHash).
-		AddOp(txscript.OP_EQUAL).
-		Script()
-}
-
-// CovenantClaimClosure returns the ConditionMultisigClosure that gates a
-// preimage-locked, covenant-enforced claim. Drop it into any
-// TapscriptsVtxoScript alongside other closures the caller wants in the
-// tree (refund paths, escape hatches, etc.).
-//
-// The closure shape:
-//
-//	ConditionMultisigClosure{
-//	    MultisigClosure{ serverPubKey, EmulatorTweaked(EnforcePayTo) },
-//	    Condition: OP_HASH160 <preimageHash> OP_EQUAL,
-//	}
 func CovenantClaimClosure(
 	preimageHash []byte,
 	receiverPkScript []byte,
@@ -112,18 +61,6 @@ func CovenantClaimClosure(
 	}, nil
 }
 
-// emulatorTweakedKey derives the emulator pubkey tweaked by an arkade
-// script. It's the second pubkey in a CovenantClaimClosure's multisig and the
-// one the plugin matches against to identify a claim closure in a funder's
-// taptree.
-func emulatorTweakedKey(arkadeScript []byte, emulatorPubKey *btcec.PublicKey) *btcec.PublicKey {
-	return arkade.ComputeArkadeScriptPublicKey(
-		emulatorPubKey, arkade.ArkadeScriptHash(arkadeScript),
-	)
-}
-
-// ValidateArkadeScript accepts only the byte sequence produced by
-// EnforcePayTo for some P2TR receiver. Returns the receiver pkScript on success.
 func ValidateArkadeScript(arkadeScript []byte) ([]byte, error) {
 	receiver, err := parseReceiverFromArkadeScript(arkadeScript)
 	if err != nil {
@@ -137,6 +74,33 @@ func ValidateArkadeScript(arkadeScript []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported arkade_script shape: only EnforcePayTo is accepted in v1")
 	}
 	return receiver, nil
+}
+
+func p2trWitnessProgram(pkScript []byte) ([]byte, error) {
+	if len(pkScript) != 34 {
+		return nil, fmt.Errorf("expected 34-byte P2TR pkScript, got %d", len(pkScript))
+	}
+	if pkScript[0] != txscript.OP_1 || pkScript[1] != txscript.OP_DATA_32 {
+		return nil, fmt.Errorf("not a P2TR script: prefix %02x %02x", pkScript[0], pkScript[1])
+	}
+	return pkScript[2:], nil
+}
+
+func preimageCondition(preimageHash []byte) ([]byte, error) {
+	if len(preimageHash) != 20 {
+		return nil, fmt.Errorf("expected 20-byte HASH160, got %d", len(preimageHash))
+	}
+	return txscript.NewScriptBuilder().
+		AddOp(txscript.OP_HASH160).
+		AddData(preimageHash).
+		AddOp(txscript.OP_EQUAL).
+		Script()
+}
+
+func emulatorTweakedKey(arkadeScript []byte, emulatorPubKey *btcec.PublicKey) *btcec.PublicKey {
+	return arkade.ComputeArkadeScriptPublicKey(
+		emulatorPubKey, arkade.ArkadeScriptHash(arkadeScript),
+	)
 }
 
 func parseReceiverFromArkadeScript(arkadeScript []byte) ([]byte, error) {

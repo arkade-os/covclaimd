@@ -1,0 +1,100 @@
+{
+  "claim_packet": {
+    "valid": [
+      {
+        "name": "ciphertext and enforce_pay_to arkade script",
+        "ciphertext": "deadbeef",
+        "arkade_script": "cd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a2",
+        "expected_serialized": "010004deadbeef02002bcd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a2"
+      },
+      {
+        "name": "single-byte fields",
+        "ciphertext": "aa",
+        "arkade_script": "51",
+        "expected_serialized": "010001aa02000151"
+      }
+    ],
+    "invalid_serialize": [
+      {
+        "name": "empty ciphertext",
+        "ciphertext": "",
+        "arkade_script": "51",
+        "expected_error": "ciphertext must not be empty"
+      },
+      {
+        "name": "empty arkade script",
+        "ciphertext": "aa",
+        "arkade_script": "",
+        "expected_error": "arkade_script must not be empty"
+      }
+    ],
+    "invalid_deserialize": [
+      {
+        "name": "truncated TLV header",
+        "data": "0100",
+        "expected_error": "truncated TLV"
+      },
+      {
+        "name": "TLV length overruns buffer",
+        "data": "010005aa",
+        "expected_error": "truncated TLV"
+      },
+      {
+        "name": "missing arkade script TLV",
+        "data": "010001aa",
+        "expected_error": "missing arkade_script TLV"
+      },
+      {
+        "name": "missing ciphertext TLV",
+        "data": "02000151",
+        "expected_error": "missing ciphertext TLV"
+      },
+      {
+        "name": "only unknown TLV types",
+        "data": "ff000100",
+        "expected_error": "missing ciphertext TLV"
+      },
+      {
+        "name": "empty input",
+        "data": "",
+        "expected_error": "missing ciphertext TLV"
+      }
+    ]
+  },
+  "arkade_script": {
+    "valid": [
+      {
+        "name": "enforce_pay_to for fixed receiver",
+        "script": "cd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a2",
+        "expected_receiver": "51201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+      }
+    ],
+    "invalid": [
+      {
+        "name": "empty script",
+        "script": "",
+        "expected_error": "empty arkade_script"
+      },
+      {
+        "name": "no OP_DATA_32 push",
+        "script": "a987",
+        "expected_error": "no OP_DATA_32 push"
+      },
+      {
+        "name": "two OP_DATA_32 pushes",
+        "script": "200101010101010101010101010101010101010101010101010101010101010101200202020202020202020202020202020202020202020202020202020202020202",
+        "expected_error": "expected exactly 1"
+      },
+      {
+        "name": "corrupted trailing opcode",
+        "script": "cd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc95d",
+        "expected_error": "unsupported arkade_script shape"
+      },
+      {
+        "name": "hand-crafted two-output script (v1 restriction)",
+        "script": "0076d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cf51",
+        "expected_error": "unsupported arkade_script shape"
+      }
+    ]
+  }
+}

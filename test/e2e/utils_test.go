@@ -40,13 +40,6 @@ const (
 	emulatorAddr = "localhost:7173"
 )
 
-// setupArkClient builds, inits, and unlocks a fresh ark wallet on a temp
-// datadir. Mirrors go-sdk's test/e2e setupClient.
-//
-// Auto-settle is disabled by default: e2e flows immediately spend every
-// VTXO (fund swap → fulfill → claim), so the scheduler racing those
-// spends only produces VTXO_ALREADY_SPENT noise in the logs without
-// affecting correctness.
 func setupArkClient(t *testing.T, opts ...arksdk.WalletOption) arksdk.Wallet {
 	t.Helper()
 
@@ -69,9 +62,6 @@ func setupArkClient(t *testing.T, opts ...arksdk.WalletOption) arksdk.Wallet {
 	return arkClient
 }
 
-// faucetOffchain redeems a fresh admin-note for the wallet and waits for the
-// resulting VTXO via the wallet's vtxo event channel. Mirrors go-sdk's
-// test/e2e faucetOffchain.
 func faucetOffchain(t *testing.T, client arksdk.Wallet, amount float64) clientTypes.Vtxo {
 	t.Helper()
 	ctx := t.Context()
@@ -115,7 +105,6 @@ func faucetOffchain(t *testing.T, client arksdk.Wallet, amount float64) clientTy
 	}
 }
 
-// generateNote requests a fresh admin note from arkd for `amount` sats.
 func generateNote(t *testing.T, amount uint64) string {
 	t.Helper()
 	note, err := generateNoteCtx(t.Context(), amount)
@@ -123,8 +112,6 @@ func generateNote(t *testing.T, amount uint64) string {
 	return note
 }
 
-// generateNoteCtx is the context-aware variant used from non-test setup
-// helpers (e.g. TestMain).
 func generateNoteCtx(_ context.Context, amount uint64) (string, error) {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	reqBody := bytes.NewReader([]byte(fmt.Sprintf(`{"amount": "%d"}`, amount)))
@@ -138,7 +125,6 @@ func generateNoteCtx(_ context.Context, amount uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// nolint:errcheck
 	defer resp.Body.Close()
 	var noteResp struct {
 		Notes []string `json:"notes"`
@@ -167,12 +153,6 @@ func faucet(ctx context.Context, address string, amount float64) error {
 	return err
 }
 
-// sendOffChainToVHTLC funds claimAddr while attaching pkt as the OP_RETURN
-// extension AND setting encodedTapTree on the funding output's
-// POutput.TaprootTapTree. go-sdk's SendOffChain wrapper does not expose
-// per-output TapTree, so this bypasses it and goes through
-// offchain.BuildTxs + Client().SubmitTx + Client().FinalizeTx directly.
-// It assumes one suitable spendable VTXO and BTC-only payment.
 func sendOffChainToVHTLC(
 	t *testing.T,
 	c arksdk.Wallet,
@@ -213,10 +193,6 @@ func sendOffChainToVHTLC(
 		require.NoError(t, err)
 		ts, err := handler.GetTapscripts(contracts[0])
 		require.NoError(t, err)
-		// GetKeyRefs returns BOTH the contract's original script and the
-		// derived checkpoint script keyed to the same keyId. The ark tx
-		// spends a synthetic checkpoint VTXO whose pkScript is the latter,
-		// so the keys map must cover it for identity.SignTransaction.
 		keys, err := handler.GetKeyRefs(contracts[0])
 		require.NoError(t, err)
 		chosen = v
@@ -296,10 +272,6 @@ func sendOffChainToVHTLC(
 
 	arkB64, err := arkTx.B64Encode()
 	require.NoError(t, err)
-	// The ark tx's input pkScript is the checkpoint script (not the
-	// original contract script), so c.SignTransaction's contract-based
-	// key lookup silently no-ops. Sign via the identity directly with
-	// the keys map that covers the checkpoint script (see GetKeyRefs).
 	signedArk, err := c.Identity().SignTransaction(ctx, arkB64, signingKeys)
 	require.NoError(t, err)
 
@@ -329,7 +301,6 @@ func newEmulatorClient(t *testing.T) emulatorclient.TransportClient {
 	return emulatorclient.NewGRPCClient(conn)
 }
 
-// fetchIntroPubkey returns the emulator signer pubkey, parsed.
 func fetchIntroPubkey(t *testing.T, emulatorClient emulatorclient.TransportClient) *btcec.PublicKey {
 	t.Helper()
 	info, err := emulatorClient.GetInfo(t.Context())
@@ -341,7 +312,6 @@ func fetchIntroPubkey(t *testing.T, emulatorClient emulatorclient.TransportClien
 	return pub
 }
 
-// freshTaprootPkScript returns a fresh 34-byte P2TR script for a throwaway key.
 func freshTaprootPkScript(t *testing.T) []byte {
 	t.Helper()
 	priv, err := btcec.NewPrivateKey()
@@ -351,18 +321,12 @@ func freshTaprootPkScript(t *testing.T) []byte {
 	return pkScript
 }
 
-// indexerVtxo is a small projection of the bot indexer's GetVtxos response —
-// just the fields tests need.
 type indexerVtxo struct {
 	Txid   string
 	VOut   uint32
 	Amount uint64
 }
 
-// pollForVtxoAt polls the indexer for any spendable VTXO at the given pkScript.
-// Returns the first match or fails the test on timeout. Used when the address
-// isn't owned by a wallet (e.g. preimage receiver pkScripts), so wallet event
-// channels can't be used.
 func pollForVtxoAt(t *testing.T, ctx context.Context, idx indexer.Indexer, pkScript []byte, timeout time.Duration) indexerVtxo {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
