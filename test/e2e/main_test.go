@@ -94,7 +94,7 @@ func runCovclaimd(
 	if err != nil {
 		return fmt.Errorf("connect to emulator: %w", err)
 	}
-	defer emulatorConn.Close()
+	defer func() { _ = emulatorConn.Close() }()
 	emulator := emulatorclient.NewGRPCClient(emulatorConn)
 
 	emulatorInfo, err := emulator.GetInfo(ctx)
@@ -198,7 +198,7 @@ func waitCovclaimdReady(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := covclaimdv1.NewPreimageServiceClient(conn)
 
 	for {

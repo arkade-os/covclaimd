@@ -125,7 +125,7 @@ func generateNoteCtx(_ context.Context, amount uint64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var noteResp struct {
 		Notes []string `json:"notes"`
 	}
