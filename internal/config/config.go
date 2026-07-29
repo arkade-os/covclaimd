@@ -14,6 +14,7 @@ const (
 	defaultGRPCPort = 7070
 	defaultHTTPPort = 7071
 	defaultLogLevel = 4
+	secretKeyLen    = 32
 )
 
 type Config struct {
@@ -65,10 +66,16 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode secret key hex")
 	}
+	if len(secretKeyBytes) != secretKeyLen {
+		return nil, fmt.Errorf(
+			"SECRET_KEY must be %d bytes (%d hex chars), got %d",
+			secretKeyLen, secretKeyLen*2, len(secretKeyBytes),
+		)
+	}
 
 	seckey, _ := btcec.PrivKeyFromBytes(secretKeyBytes)
-	if seckey == nil {
-		return nil, fmt.Errorf("failed to parse to secret key")
+	if seckey.Key.IsZero() {
+		return nil, fmt.Errorf("SECRET_KEY must not be zero")
 	}
 
 	encryptedEnabled, err := envBool("ENCRYPTED_ENABLED", true)

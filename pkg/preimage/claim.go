@@ -13,6 +13,7 @@ import (
 	"github.com/arkade-os/emulator/pkg/arkade"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -55,7 +56,7 @@ func BuildClaim(
 		return nil, nil, fmt.Errorf("decode taptree: %w", err)
 	}
 	expectedTweaked := emulatorTweakedKey(creds.ArkadeScript, emulatorPubKey)
-	claimClosure, err := findClaimClosure(vtxoScript, signerPubKey, expectedTweaked)
+	claimClosure, err := findClaimClosure(vtxoScript, signerPubKey, expectedTweaked, creds.Preimage)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find claim closure: %w", err)
 	}
@@ -138,17 +139,25 @@ func BuildClaim(
 func findClaimClosure(
 	vtxoScript *script.TapscriptsVtxoScript,
 	serverPubKey, expectedTweaked *btcec.PublicKey,
+	preimage []byte,
 ) (script.Closure, error) {
+	expectedCondition, err := preimageCondition(btcutil.Hash160(preimage))
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range vtxoScript.Closures {
 		cmc, ok := c.(*script.ConditionMultisigClosure)
 		if !ok {
+			continue
+		}
+		if !bytes.Equal(cmc.Condition, expectedCondition) {
 			continue
 		}
 		if hasExactlyTwoKeys(cmc.PubKeys, serverPubKey, expectedTweaked) {
 			return cmc, nil
 		}
 	}
-	return nil, errors.New("no ConditionMultisigClosure with (serverPubKey, expectedTweaked) found in taptree")
+	return nil, errors.New("no ConditionMultisigClosure with (serverPubKey, expectedTweaked) and matching preimage condition found in taptree")
 }
 
 func hasExactlyTwoKeys(pubKeys []*btcec.PublicKey, a, b *btcec.PublicKey) bool {

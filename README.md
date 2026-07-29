@@ -91,11 +91,28 @@ GET /v1/preimage/covclaimd-pubkey
 ### `RevealService.Reveal`
 
 Registers a claim packet for a swap address (reveal path only; served only when
-`COVCLAIMD_REVEAL_ENABLED=true`). The bot validates the packet — decrypts the
-preimage with its key, checks the arkade script, and derives the funding script
-from the address — and rejects invalid submissions with `400 / InvalidArgument`.
-The full taptree/closure binding is verified later, at claim time, against the
-funding output.
+`COVCLAIMD_REVEAL_ENABLED=true`). The submission must carry the funding
+output's taptree, and the bot binds all of it together before accepting:
+
+- the taptree must hash to the taproot key of `swap_address`;
+- the taptree must contain a `ConditionMultisigClosure` keyed by
+  `(serverPubKey, emulatorTweakedKey(arkade_script))`;
+- that closure's condition must be `HASH160(preimage) EQUAL` for the preimage
+  decrypted from `ciphertext`, which must be 32 bytes;
+- `arkade_script` must be a canonical `EnforcePayTo(receiver)`.
+
+Anything that fails is rejected with `400 / InvalidArgument`. Because a packet
+is only accepted when it provably belongs to the address it names, a third
+party who learns a swap address cannot register a packet for it, and a repeat
+submission for the same address is harmless (it replaces the entry with an
+equivalent one). Registrations expire after 15min and the registry is capped at
+10k entries (`429 / ResourceExhausted` when full). If the address is already
+funded, the claim runs in the background — `Reveal` returns as soon as the
+packet is accepted.
+
+The registered taptree is what the claim is built from, so on this path the
+funding transaction does not need to carry the output's taptree: matching is
+by pkScript alone.
 
 ```
 POST /v1/reveal
@@ -107,7 +124,8 @@ POST /v1/reveal
   "packet": {
     "ciphertext": "<base64 (standard, padded) ECIES(covclaimdPub, 32-byte preimage)>",
     "arkade_script": "<base64 (standard, padded) EnforcePayTo(receiver) bytes>"
-  }
+  },
+  "taptree": "<hex-encoded BIP-371 taptree of the funding output>"
 }
 ```
 
@@ -119,7 +137,7 @@ All configuration is via environment variables prefixed with `COVCLAIMD_`.
 |---|---|---|---|
 | `COVCLAIMD_ARK_URL` | yes | — | arkd gRPC address (`host:port`). |
 | `COVCLAIMD_EMULATOR_URL` | yes | — | Emulator (covenant signer) gRPC address (`host:port`). |
-| `COVCLAIMD_SECRET_KEY` | effectively yes | zero key | Hex-encoded secp256k1 private key — the bot's ECIES identity, used to decrypt claim packets. **Not validated**: if unset it silently parses to a zero (insecure) key, so always set it explicitly. |
+| `COVCLAIMD_SECRET_KEY` | yes | — | Hex-encoded 32-byte secp256k1 private key — the bot's ECIES identity, used to decrypt claim packets. Startup fails if it is missing, not 64 hex chars, or zero. |
 | `COVCLAIMD_GRPC_PORT` | no | `7070` | gRPC listen port. |
 | `COVCLAIMD_HTTP_PORT` | no | `7071` | REST gateway listen port (must differ from gRPC). |
 | `COVCLAIMD_ENCRYPTED_ENABLED` | no | `true` | Run the Arkade-extension claim plugin. |

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,24 @@ func TestLoad_DefaultsEncryptedOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, cfg.EncryptedEnabled, "encrypted defaults on")
 	assert.False(t, cfg.RevealEnabled, "reveal defaults off")
+}
+
+func TestLoad_RejectsWeakSecretKey(t *testing.T) {
+	for name, key := range map[string]string{
+		"unset":  "",
+		"short":  "ab",
+		"zero":   strings.Repeat("00", 32),
+		"nonhex": "zz",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("COVCLAIMD_ARK_URL", "localhost:7070")
+			t.Setenv("COVCLAIMD_EMULATOR_URL", "localhost:7273")
+			t.Setenv("COVCLAIMD_SECRET_KEY", key)
+
+			_, err := Load()
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestLoad_BothDisabledIsError(t *testing.T) {

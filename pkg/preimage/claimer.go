@@ -31,7 +31,7 @@ func newClaimer(cfg Config) (*claimer, error) {
 }
 
 func (c *claimer) decodePacket(pkt *ClaimPacket) ([]byte, bool) {
-	preimg, err := validatePacket(c.cfg.SecretKey, pkt)
+	preimg, err := pkt.Decrypt(c.cfg.SecretKey)
 	if err != nil {
 		c.log.WithError(err).Debug("preimage packet validation failed")
 		return nil, false
@@ -59,7 +59,7 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 		c.log.WithError(err).Debug("preimage taptree.Decode failed")
 		return nil, false
 	}
-	if _, err := findClaimClosure(vs, c.cfg.SignerPubKey, expectedTweaked); err != nil {
+	if _, err := findClaimClosure(vs, c.cfg.SignerPubKey, expectedTweaked, preimg); err != nil {
 		return nil, false
 	}
 	tapKey, _, err := vs.TapTree()
@@ -160,18 +160,4 @@ func validateConfig(cfg Config) error {
 		return fmt.Errorf("checkpoint tapscript must not be empty")
 	}
 	return nil
-}
-
-func validatePacket(secretKey *btcec.PrivateKey, pkt *ClaimPacket) ([]byte, error) {
-	if _, err := ValidateArkadeScript(pkt.ArkadeScript); err != nil {
-		return nil, fmt.Errorf("invalid arkade_script: %w", err)
-	}
-	preimg, err := Decrypt(secretKey, pkt.Ciphertext)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt preimage: %w", err)
-	}
-	if len(preimg) != 32 {
-		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
-	}
-	return preimg, nil
 }

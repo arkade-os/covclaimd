@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func TestRevealFundAndClaim(t *testing.T) {
 			Ciphertext:   pkt.Ciphertext,
 			ArkadeScript: pkt.ArkadeScript,
 		},
+		Taptree: hex.EncodeToString(encodedTapTree),
 	})
 	require.NoError(t, err, "reveal submission must be accepted")
 
@@ -103,6 +105,7 @@ func TestRevealAfterFunding(t *testing.T) {
 			Ciphertext:   pkt.Ciphertext,
 			ArkadeScript: pkt.ArkadeScript,
 		},
+		Taptree: hex.EncodeToString(encodedTapTree),
 	})
 	require.NoError(t, err, "reveal after funding must be accepted")
 
@@ -128,7 +131,7 @@ func TestRevealInvalidArkadeScriptRejected(t *testing.T) {
 	receiverPk := freshTaprootPkScript(t)
 	preimg := freshPreimage(t)
 
-	claimAddr, claimPacket, _ := buildPreimageVTXO(
+	claimAddr, claimPacket, encodedTapTree := buildPreimageVTXO(
 		t, preimg, receiverPk, covclaimdPub,
 		cfgData.SignerPubKey, emulatorPub, cfgData.Network,
 	)
@@ -143,8 +146,50 @@ func TestRevealInvalidArkadeScriptRejected(t *testing.T) {
 			Ciphertext:   pkt.Ciphertext,
 			ArkadeScript: []byte{0xde, 0xad, 0xbe, 0xef},
 		},
+		Taptree: hex.EncodeToString(encodedTapTree),
 	})
 	require.Error(t, err, "tampered arkade script must be rejected at submit time")
+}
+
+func TestRevealForeignTaptreeRejected(t *testing.T) {
+	ctx := t.Context()
+
+	emulator := newEmulatorClient(t)
+	emulatorPub := fetchIntroPubkey(t, emulator)
+
+	maker := setupArkClient(t)
+
+	bot := dialPreimageClient(t)
+	covclaimdPub := fetchCovclaimdPubKey(t, bot)
+	reveal := dialRevealClient(t)
+
+	cfgData, err := maker.GetConfigData(ctx)
+	require.NoError(t, err)
+
+	preimg := freshPreimage(t)
+	victimAddr, _, _ := buildPreimageVTXO(
+		t, preimg, freshTaprootPkScript(t), covclaimdPub,
+		cfgData.SignerPubKey, emulatorPub, cfgData.Network,
+	)
+	_, attackerPacket, attackerTapTree := buildPreimageVTXO(
+		t, preimg, freshTaprootPkScript(t), covclaimdPub,
+		cfgData.SignerPubKey, emulatorPub, cfgData.Network,
+	)
+
+	body, err := attackerPacket.Serialize()
+	require.NoError(t, err)
+	pkt, err := preimage.DeserializeClaim(body)
+	require.NoError(t, err)
+
+	_, err = reveal.Reveal(ctx, &covclaimdv1.RevealRequest{
+		SwapAddress: victimAddr,
+		Packet: &covclaimdv1.ClaimPacket{
+			Ciphertext:   pkt.Ciphertext,
+			ArkadeScript: pkt.ArkadeScript,
+		},
+		Taptree: hex.EncodeToString(attackerTapTree),
+	})
+	require.Error(t, err, "a packet whose taptree does not hash to the swap address must be rejected")
 }
 
 func dialRevealClient(t *testing.T) covclaimdv1.RevealServiceClient {

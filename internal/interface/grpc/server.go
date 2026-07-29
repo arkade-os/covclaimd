@@ -127,6 +127,7 @@ func registerRevealRoutes(mux *http.ServeMux, svc covclaimdv1.RevealServiceServe
 				Ciphertext   string `json:"ciphertext"`
 				ArkadeScript string `json:"arkade_script"`
 			} `json:"packet"`
+			Taptree string `json:"taptree"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			httpError(w, err, http.StatusBadRequest)
@@ -145,6 +146,7 @@ func registerRevealRoutes(mux *http.ServeMux, svc covclaimdv1.RevealServiceServe
 		resp, err := svc.Reveal(r.Context(), &covclaimdv1.RevealRequest{
 			SwapAddress: body.SwapAddress,
 			Packet:      &covclaimdv1.ClaimPacket{Ciphertext: ciphertext, ArkadeScript: arkadeScript},
+			Taptree:     body.Taptree,
 		})
 		if err != nil {
 			httpGRPCError(w, err)
@@ -183,6 +185,8 @@ func httpGRPCError(w http.ResponseWriter, err error) {
 		httpCode = http.StatusConflict
 	case codes.Unimplemented:
 		httpCode = http.StatusNotImplemented
+	case codes.ResourceExhausted:
+		httpCode = http.StatusTooManyRequests
 	}
 	httpError(w, err, httpCode)
 }

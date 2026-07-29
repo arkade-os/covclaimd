@@ -7,9 +7,12 @@ submit it to the emulator; they differ only in how the `ClaimPacket`
 
 - **Encrypted plugin** (`NewPlugin`): the maker stamps the packet into the
   tx's Arkade extension (`BuildPacket`).
-- **Reveal plugin** (`NewRevealPlugin`): the maker submits the packet
-  out-of-band via `RevealService` (`RevealPlugin.Submit`); the plugin keeps
-  it in memory keyed by the funding output's pkScript.
+- **Reveal plugin** (`NewRevealPlugin`): the maker submits the packet plus the
+  funding output's hex BIP-371 taptree out-of-band via `RevealService`
+  (`RevealPlugin.Submit`); the plugin verifies the packet against the taptree
+  and keeps both in memory keyed by the funding output's pkScript. The stored
+  taptree is what the claim is built from, so the funding tx itself needs no
+  `TaprootTapTree`.
 
 ## Match
 
@@ -17,14 +20,17 @@ A tx output is claimed when **all** of the following hold:
 
 1. A `ClaimPacket` is found — from the Arkade extension
    (`FindClaim`, `PacketType = 0x04`) or from the reveal plugin's in-memory
-   map keyed by `hex(out.PkScript)`.
+   map keyed by `hex(out.PkScript)`. Steps 2-4 are the encrypted path; the
+   reveal path did them at submit time against the registered taptree, so it
+   goes straight from the map hit to step 5.
 2. `ValidateArkadeScript(packet.ArkadeScript)` passes — only
    `EnforcePayTo(receiverPk)` byte sequences are accepted.
 3. `Decrypt(secretKey, packet.Ciphertext)` yields a 32-byte preimage.
 4. The output's `POutput.TaprootTapTree` (BIP-371) decodes as a
    `TapscriptsVtxoScript` containing a `ConditionMultisigClosure` whose two
-   keys are exactly `(signerPubKey, emulatorTweakedKey(arkadeScript))`, and
-   the output's pkScript equals the P2TR derived from that taptree.
+   keys are exactly `(signerPubKey, emulatorTweakedKey(arkadeScript))` and
+   whose condition is `HASH160(preimage) EQUAL` for the decrypted preimage,
+   and the output's pkScript equals the P2TR derived from that taptree.
 5. The funding VTXO is still spendable per the indexer
    (`GetVtxos(WithScripts, WithSpendableOnly)`).
 
@@ -78,7 +84,7 @@ gRPC + HTTP so makers can encrypt preimages against the right keys.
 ## Files quick-reference
 
 - `plugin.go` — `Config`, `NewPlugin`, encrypted-path `Filter`/`Match`/`Solve`.
-- `reveal_plugin.go` — `RevealPlugin`: `Submit` (write side, RevealService backend) plus `Match`/`Solve` over its in-memory packet map (process-local; lost on restart, makers re-submit).
+- `reveal_plugin.go` — `RevealPlugin`: `Submit` (write side, RevealService backend) plus `Match`/`Solve` over its in-memory registration map (process-local; lost on restart, makers re-submit). `Submit` accepts a packet only if the supplied taptree hashes to the swap address and holds the claim closure for that arkade script and preimage (`bindsToAddress`), so a registration can't be made for someone else's address. `matchRegistered` then matches on pkScript alone and builds the claim from the registered taptree. 15min TTL, 10k cap (`ErrRegistryFull`).
 - `claimer.go` — shared core: packet validation, output matching, spendability gate, claim submission.
 - `packet.go` — `ClaimPacket` TLV codec (`PacketType = 0x04`) and `FindClaim`.
 - `claim.go` — `MatchedClaim`, `BuildClaim`, closure-search helpers.

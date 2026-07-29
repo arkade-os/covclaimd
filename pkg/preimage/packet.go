@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
+	"github.com/btcsuite/btcd/btcec/v2"
 )
 
 const PacketType uint8 = 0x04
@@ -19,6 +20,20 @@ const (
 type ClaimPacket struct {
 	Ciphertext   []byte // encrypted preimage or whatever allowing the claim
 	ArkadeScript []byte
+}
+
+func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
+	if _, err := ValidateArkadeScript(p.ArkadeScript); err != nil {
+		return nil, fmt.Errorf("invalid arkade_script: %w", err)
+	}
+	preimg, err := Decrypt(secretKey, p.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt preimage: %w", err)
+	}
+	if len(preimg) != 32 {
+		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
+	}
+	return preimg, nil
 }
 
 func (p *ClaimPacket) Type() uint8 { return PacketType }

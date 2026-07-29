@@ -32,9 +32,10 @@ const (
 // stream, and claims the moment the swap address is funded.
 type RevealServiceClient interface {
 	// Reveal registers a claim packet for a swap address. The bot validates the
-	// packet (decrypts the preimage, checks the arkade script) and stores it;
-	// invalid submissions are rejected. Served over HTTP as POST /v1/reveal by
-	// the hand-rolled gateway in internal/interface/grpc/server.go.
+	// packet against the taptree — the taptree must hash to the swap address and
+	// must contain the claim closure for this arkade script and preimage — and
+	// rejects anything it cannot bind to the address. Served over HTTP as POST
+	// /v1/reveal by the hand-rolled gateway in internal/interface/grpc/server.go.
 	Reveal(ctx context.Context, in *RevealRequest, opts ...grpc.CallOption) (*RevealResponse, error)
 }
 
@@ -66,9 +67,10 @@ func (c *revealServiceClient) Reveal(ctx context.Context, in *RevealRequest, opt
 // stream, and claims the moment the swap address is funded.
 type RevealServiceServer interface {
 	// Reveal registers a claim packet for a swap address. The bot validates the
-	// packet (decrypts the preimage, checks the arkade script) and stores it;
-	// invalid submissions are rejected. Served over HTTP as POST /v1/reveal by
-	// the hand-rolled gateway in internal/interface/grpc/server.go.
+	// packet against the taptree — the taptree must hash to the swap address and
+	// must contain the claim closure for this arkade script and preimage — and
+	// rejects anything it cannot bind to the address. Served over HTTP as POST
+	// /v1/reveal by the hand-rolled gateway in internal/interface/grpc/server.go.
 	Reveal(context.Context, *RevealRequest) (*RevealResponse, error)
 }
 
