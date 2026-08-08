@@ -42,8 +42,10 @@ func BuildClaim(
 		return nil, nil, errors.New("matched is nil")
 	}
 	creds := matched.Credentials
-	if len(creds.Preimage) == 0 {
-		return nil, nil, errors.New("preimage is empty")
+	if len(creds.Preimage) != preimageSize {
+		return nil, nil, fmt.Errorf(
+			"preimage must be %d bytes, got %d", preimageSize, len(creds.Preimage),
+		)
 	}
 
 	receiverPkScript, err := ValidateArkadeScript(creds.ArkadeScript)

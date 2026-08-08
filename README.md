@@ -97,8 +97,8 @@ output's taptree, and the bot binds all of it together before accepting:
 - the taptree must hash to the taproot key of `swap_address`;
 - the taptree must contain a `ConditionMultisigClosure` keyed by
   `(serverPubKey, emulatorTweakedKey(arkade_script))`;
-- that closure's condition must be `HASH160(preimage) EQUAL` for the preimage
-  decrypted from `ciphertext`, which must be 32 bytes;
+- that closure's condition must be `SIZE 32 EQUALVERIFY HASH160(preimage) EQUAL`
+  for the preimage decrypted from `ciphertext`, which must be 32 bytes;
 - `arkade_script` must be a canonical `EnforcePayTo(receiver)`.
 
 Anything that fails is rejected with `400 / InvalidArgument`. Because a packet

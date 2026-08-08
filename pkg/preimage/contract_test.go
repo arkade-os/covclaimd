@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,11 +66,34 @@ func TestPreimageCondition_Shape(t *testing.T) {
 	cond, err := preimageCondition(hash)
 	require.NoError(t, err)
 
-	require.Len(t, cond, 23)
-	assert.Equal(t, byte(txscript.OP_HASH160), cond[0])
-	assert.Equal(t, byte(txscript.OP_DATA_20), cond[1])
-	assert.Equal(t, hash, cond[2:22])
-	assert.Equal(t, byte(txscript.OP_EQUAL), cond[22])
+	require.Len(t, cond, 27)
+	assert.Equal(t, byte(txscript.OP_SIZE), cond[0])
+	assert.Equal(t, byte(txscript.OP_DATA_1), cond[1])
+	assert.Equal(t, byte(0x20), cond[2])
+	assert.Equal(t, byte(txscript.OP_EQUALVERIFY), cond[3])
+	assert.Equal(t, byte(txscript.OP_HASH160), cond[4])
+	assert.Equal(t, byte(txscript.OP_DATA_20), cond[5])
+	assert.Equal(t, hash, cond[6:26])
+	assert.Equal(t, byte(txscript.OP_EQUAL), cond[26])
+}
+
+func TestPreimageCondition_EnforcesPreimageSize(t *testing.T) {
+	preimage := bytes.Repeat([]byte{0x42}, 32)
+	cond, err := preimageCondition(btcutil.Hash160(preimage))
+	require.NoError(t, err)
+
+	ok, err := script.EvaluateScriptToBool(cond, wire.TxWitness{preimage})
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	for _, size := range []int{0, 20, 31, 33, 64} {
+		short := bytes.Repeat([]byte{0x42}, size)
+		cond, err := preimageCondition(btcutil.Hash160(short))
+		require.NoError(t, err)
+		ok, err := script.EvaluateScriptToBool(cond, wire.TxWitness{short})
+		assert.False(t, ok, "preimage of %d bytes must not satisfy the condition", size)
+		assert.Error(t, err)
+	}
 }
 
 func TestPreimageCondition_RejectsBadLength(t *testing.T) {

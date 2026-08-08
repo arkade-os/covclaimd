@@ -10,6 +10,8 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 )
 
+const preimageSize = 32
+
 func EnforcePayTo(receiverPkScript []byte) ([]byte, error) {
 	witnessProgram, err := p2trWitnessProgram(receiverPkScript)
 	if err != nil {
@@ -91,6 +93,9 @@ func preimageCondition(preimageHash []byte) ([]byte, error) {
 		return nil, fmt.Errorf("expected 20-byte HASH160, got %d", len(preimageHash))
 	}
 	return txscript.NewScriptBuilder().
+		AddOp(txscript.OP_SIZE).
+		AddInt64(preimageSize).
+		AddOp(txscript.OP_EQUALVERIFY).
 		AddOp(txscript.OP_HASH160).
 		AddData(preimageHash).
 		AddOp(txscript.OP_EQUAL).

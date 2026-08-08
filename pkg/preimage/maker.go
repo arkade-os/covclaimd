@@ -13,8 +13,8 @@ func BuildPacket(
 	covclaimdPubKey *btcec.PublicKey,
 	receiverPkScript []byte,
 ) (extension.Packet, error) {
-	if len(preimage) != 32 {
-		return nil, fmt.Errorf("preimage must be 32 bytes, got %d", len(preimage))
+	if len(preimage) != preimageSize {
+		return nil, fmt.Errorf("preimage must be %d bytes, got %d", preimageSize, len(preimage))
 	}
 	if covclaimdPubKey == nil {
 		return nil, errors.New("covclaimd pubkey must not be nil")
