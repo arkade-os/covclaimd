@@ -30,8 +30,10 @@ func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decrypt preimage: %w", err)
 	}
-	if len(preimg) != 32 {
-		return nil, fmt.Errorf("decrypted preimage has wrong length %d (want 32)", len(preimg))
+	if len(preimg) != preimageSize {
+		return nil, fmt.Errorf(
+			"decrypted preimage has wrong length %d (want %d)", len(preimg), preimageSize,
+		)
 	}
 	return preimg, nil
 }

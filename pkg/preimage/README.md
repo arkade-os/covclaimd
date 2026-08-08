@@ -29,7 +29,8 @@ A tx output is claimed when **all** of the following hold:
 4. The output's `POutput.TaprootTapTree` (BIP-371) decodes as a
    `TapscriptsVtxoScript` containing a `ConditionMultisigClosure` whose two
    keys are exactly `(signerPubKey, emulatorTweakedKey(arkadeScript))` and
-   whose condition is `HASH160(preimage) EQUAL` for the decrypted preimage,
+   whose condition is `SIZE 32 EQUALVERIFY HASH160(preimage) EQUAL` for the
+   decrypted preimage,
    and the output's pkScript equals the P2TR derived from that taptree.
 5. The funding VTXO is still spendable per the indexer
    (`GetVtxos(WithScripts, WithSpendableOnly)`).
