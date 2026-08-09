@@ -7,6 +7,7 @@ import (
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/emulator/pkg/arkade"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,21 @@ func TestFindClaimClosure_NamesTheCause(t *testing.T) {
 		_, err := findClaimClosure(vs, server, tweaked, preimage)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no ConditionMultisigClosure")
+	})
+
+	// The realistic wrong-contract-shape case: a taptree that is perfectly
+	// well-formed and simply is not a claimable contract. The empty-taptree
+	// case above cannot distinguish "no leaves" from "no leaves of this kind",
+	// and it is the second that an operator actually meets.
+	t.Run("leaves exist but none is a condition closure", func(t *testing.T) {
+		vs := &script.TapscriptsVtxoScript{Closures: []script.Closure{
+			&script.MultisigClosure{PubKeys: []*btcec.PublicKey{server, tweaked}},
+		}}
+		_, err := findClaimClosure(vs, server, tweaked, preimage)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no ConditionMultisigClosure")
+		// Counts what it did find, so "wrong shape" is separable from "empty".
+		assert.Contains(t, err.Error(), "1 closure(s)")
 	})
 
 	t.Run("condition closures exist but none commits to this preimage", func(t *testing.T) {
