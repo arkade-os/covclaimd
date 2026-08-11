@@ -42,6 +42,17 @@ func (p *ClaimPacket) AddressedTo(pub []byte) bool {
 	return len(pub) == compressedPubKeyLen && bytes.Equal(p.CovclaimdPubKey, pub)
 }
 
+// SealedToAnother reports whether the packet names a covclaimd that is not pub,
+// which is the only case worth declining before decryption.
+//
+// A packet naming nobody is not "another": that is the shape that predates this
+// field, and its gate is the decryption, the way it always was. Reading this as
+// "not addressed to us" would strand every swap funded by an emitter that has
+// not started stamping the key yet.
+func (p *ClaimPacket) SealedToAnother(pub []byte) bool {
+	return len(p.CovclaimdPubKey) > 0 && !p.AddressedTo(pub)
+}
+
 func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
 	if _, err := ValidateArkadeScript(p.ArkadeScript); err != nil {
 		return nil, fmt.Errorf("invalid arkade_script: %w", err)
@@ -92,7 +103,6 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 	out := &ClaimPacket{}
 	hasCiphertext := false
 	hasArkadeScript := false
-	hasCovclaimdPubKey := false
 
 	offset := 0
 	for offset < len(data) {
@@ -128,7 +138,6 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 				)
 			}
 			out.CovclaimdPubKey = val
-			hasCovclaimdPubKey = true
 		}
 	}
 
@@ -138,9 +147,11 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 	if !hasArkadeScript {
 		return nil, errors.New("missing arkade_script TLV (0x02)")
 	}
-	if !hasCovclaimdPubKey {
-		return nil, errors.New("missing covclaimd_pub_key TLV (0x03)")
-	}
+	// There is deliberately no check for 0x03 here. It is required to write and
+	// optional to read: Serialize will not emit a packet without it, but one
+	// that predates the field still parses and still claims, exactly as before.
+	// Making it mandatory is a one-line addition, and is the right change once
+	// nothing is stamping the old two-TLV shape any more.
 	return out, nil
 }
 

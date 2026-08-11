@@ -141,6 +141,47 @@ func TestClaimPacket_AddressedTo(t *testing.T) {
 	})
 }
 
+// This is the predicate the plugin actually declines on, and the distinction it
+// draws is the whole of the staged rollout: "names someone else" is a decline,
+// "names nobody" is not.
+func TestClaimPacket_SealedToAnother(t *testing.T) {
+	ours := fromHex(t, generatorPubKeyHex)
+	other, err := btcec.NewPrivateKey()
+	require.NoError(t, err)
+	theirs := other.PubKey().SerializeCompressed()
+
+	assert.False(t, (&preimage.ClaimPacket{CovclaimdPubKey: ours}).SealedToAnother(ours),
+		"our own packet is not another's")
+	assert.True(t, (&preimage.ClaimPacket{CovclaimdPubKey: theirs}).SealedToAnother(ours),
+		"a packet naming another covclaimd is declined")
+	assert.False(t, (&preimage.ClaimPacket{}).SealedToAnother(ours),
+		"a packet naming nobody predates the field and must still be tried")
+}
+
+// 0x03 is required to write and optional to read. A packet in the two-TLV shape
+// that predates the field has to keep parsing and keep claiming — there is one
+// stamping that shape today, and rejecting it would strand every swap it funds.
+func TestDeserializeClaim_AcceptsPacketWithoutPubKey(t *testing.T) {
+	out, err := preimage.DeserializeClaim(fromHex(t, "010001aa02000151"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0xaa}, out.Ciphertext)
+	assert.Equal(t, []byte{0x51}, out.ArkadeScript)
+	assert.Empty(t, out.CovclaimdPubKey)
+	// It names nobody, so it is addressed to nobody — the caller decides what
+	// that means, and the plugin treats it as "not for someone else".
+	assert.False(t, out.AddressedTo(fromHex(t, generatorPubKeyHex)))
+}
+
+// Writing is still strict: nothing this package produces may omit the key, or
+// the packets it stamps could never be selected by a subscription filter.
+func TestClaimPacket_SerializeStillRequiresPubKey(t *testing.T) {
+	_, err := (&preimage.ClaimPacket{
+		Ciphertext:   []byte{0xaa},
+		ArkadeScript: []byte{0x51},
+	}).Serialize()
+	require.ErrorContains(t, err, "covclaimd_pub_key must be 33 bytes, got 0")
+}
+
 // The decoder does not care what order the TLVs arrive in, and the subscription
 // filter is a contains-match for that reason. If this ever became order-
 // sensitive, a sender that serialized the other way round would be dropped

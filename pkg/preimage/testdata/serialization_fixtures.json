@@ -68,11 +68,6 @@
         "expected_error": "missing ciphertext TLV"
       },
       {
-        "name": "missing covclaimd pubkey TLV",
-        "data": "010001aa02000151",
-        "expected_error": "missing covclaimd_pub_key TLV (0x03)"
-      },
-      {
         "name": "covclaimd pubkey TLV wrong length",
         "data": "010001aa02000151030002aabb",
         "expected_error": "covclaimd_pub_key TLV (0x03) is 2 bytes, want 33"
