@@ -46,6 +46,7 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 	out := tx.UnsignedTx.TxOut[i]
 	po := tx.Outputs[i]
 	if len(po.TaprootTapTree) == 0 {
+		c.log.WithField("vout", i).Debug("preimage output carries no taptree")
 		return nil, false
 	}
 
