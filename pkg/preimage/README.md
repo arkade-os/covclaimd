@@ -3,7 +3,8 @@
 Two `executor.Plugin`s that claim preimage-gated VTXOs the moment their
 funding tx appears on the arkd tx stream. Both build the same claim tx and
 submit it to the emulator; they differ only in how the `ClaimPacket`
-(ECIES ciphertext + plaintext arkade script) reaches covclaimd:
+(ECIES ciphertext + plaintext arkade script + the covclaimd pubkey the
+ciphertext is sealed to) reaches covclaimd:
 
 - **Encrypted plugin** (`NewPlugin`): the maker stamps the packet into the
   tx's Arkade extension (`BuildPacket`).
@@ -20,9 +21,14 @@ A tx output is claimed when **all** of the following hold:
 
 1. A `ClaimPacket` is found — from the Arkade extension
    (`FindClaim`, `PacketType = 0x04`) or from the reveal plugin's in-memory
-   map keyed by `hex(out.PkScript)`. Steps 2-4 are the encrypted path; the
+   map keyed by `hex(out.PkScript)`. Steps 1a-4 are the encrypted path; the
    reveal path did them at submit time against the registered taptree, so it
    goes straight from the map hit to step 5.
+   1a. `packet.AddressedTo(ourPubKey)` — the packet's `covclaimd_pub_key` TLV
+   equals this instance's key. A byte compare, and the first thing checked, so
+   another deployment's packets cost nothing on a shared stream. Only the
+   extension path carries this TLV; a reveal submission is already
+   point-to-point.
 2. `ValidateArkadeScript(packet.ArkadeScript)` passes — only
    `EnforcePayTo(receiverPk)` byte sequences are accepted.
 3. `Decrypt(secretKey, packet.Ciphertext)` yields a 32-byte preimage.
@@ -57,8 +63,23 @@ spendability gate) and removes it after a successful claim.
 
 ## Filter
 
-Both plugins return `""` — no server-side CEL filter; matching is
-structural in `Match`.
+The encrypted plugin returns a CEL expression selecting the txs whose
+extension carries a claim packet sealed to this covclaimd:
+
+```cel
+has(tx.extension) && hasPacket(tx.extension, 4) && tx.extension[4].contains('030021<covclaimd pubkey hex>')
+```
+
+arkd exposes `tx.extension` as a `map<int, string>` of packet type to the hex
+of that packet's body, so the needle is the `covclaimd_pub_key` TLV as it goes
+on the wire — header included, written by the same encoder that writes the
+packet. `contains` rather than a fixed offset because the format does not fix
+TLV order, and dropping a correctly-addressed packet would strand a swap; a
+false positive only costs the byte compare in step 1a.
+
+The reveal plugin still returns `""`. It matches on the funding output's
+pkScript, which is a script subscription rather than an expression, and the
+two are separate fields on `SubscriptionFilter`.
 
 ## Wiring
 
@@ -87,7 +108,7 @@ gRPC + HTTP so makers can encrypt preimages against the right keys.
 - `plugin.go` — `Config`, `NewPlugin`, encrypted-path `Filter`/`Match`/`Solve`.
 - `reveal_plugin.go` — `RevealPlugin`: `Submit` (write side, RevealService backend) plus `Match`/`Solve` over its in-memory registration map (process-local; lost on restart, makers re-submit). `Submit` accepts a packet only if the supplied taptree hashes to the swap address and holds the claim closure for that arkade script and preimage (`bindsToAddress`), so a registration can't be made for someone else's address. `matchRegistered` then matches on pkScript alone and builds the claim from the registered taptree. 15min TTL, 10k cap (`ErrRegistryFull`).
 - `claimer.go` — shared core: packet validation, output matching, spendability gate, claim submission.
-- `packet.go` — `ClaimPacket` TLV codec (`PacketType = 0x04`) and `FindClaim`.
+- `packet.go` — `ClaimPacket` TLV codec (`PacketType = 0x04`), `AddressedTo`, and `FindClaim`. TLVs are `0x01` ciphertext, `0x02` arkade_script, `0x03` covclaimd_pub_key; all three are required, each with a 1-byte type and a 2-byte big-endian length.
 - `claim.go` — `MatchedClaim`, `BuildClaim`, closure-search helpers.
 - `contract.go` — `EnforcePayTo`, `CovenantClaimClosure`, `ValidateArkadeScript`, emulator key tweak.
 - `crypto.go` — `Encrypt`/`Decrypt`: ECIES over secp256k1, HKDF-SHA256 → AES-256-GCM.

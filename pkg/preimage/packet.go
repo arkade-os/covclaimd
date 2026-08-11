@@ -13,13 +13,33 @@ import (
 const PacketType uint8 = 0x04
 
 const (
-	tlvCiphertext   byte = 0x01
-	tlvArkadeScript byte = 0x02
+	tlvCiphertext      byte = 0x01
+	tlvArkadeScript    byte = 0x02
+	tlvCovclaimdPubKey byte = 0x03
 )
+
+// compressedPubKeyLen is the serialized length of the committed covclaimd key.
+const compressedPubKeyLen = 33
 
 type ClaimPacket struct {
 	Ciphertext   []byte // encrypted preimage or whatever allowing the claim
 	ArkadeScript []byte
+	// CovclaimdPubKey is the compressed secp256k1 key the ciphertext is sealed
+	// to, in the clear. It names which covclaimd is meant to open this packet,
+	// so one can decline another's without attempting the decryption, and so a
+	// subscription filter can select its own off an unfiltered stream. It is
+	// not a secret and not a capability: the ciphertext is what actually binds
+	// the preimage to a key.
+	CovclaimdPubKey []byte
+}
+
+// AddressedTo reports whether the packet names pub (compressed) as the
+// covclaimd meant to open it. A byte compare, deliberately: it settles the
+// question before any ECDH or AEAD work, which is the point of committing the
+// key at all. A packet that lies here is not a risk, only wasted work — it
+// still has to decrypt, and it cannot unless it really was sealed to us.
+func (p *ClaimPacket) AddressedTo(pub []byte) bool {
+	return len(pub) == compressedPubKeyLen && bytes.Equal(p.CovclaimdPubKey, pub)
 }
 
 func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
@@ -47,9 +67,16 @@ func (p *ClaimPacket) Serialize() ([]byte, error) {
 	if len(p.ArkadeScript) == 0 {
 		return nil, errors.New("arkade_script must not be empty")
 	}
+	if len(p.CovclaimdPubKey) != compressedPubKeyLen {
+		return nil, fmt.Errorf(
+			"covclaimd_pub_key must be %d bytes, got %d",
+			compressedPubKeyLen, len(p.CovclaimdPubKey),
+		)
+	}
 	buf := &bytes.Buffer{}
 	encodeTLV(buf, tlvCiphertext, p.Ciphertext)
 	encodeTLV(buf, tlvArkadeScript, p.ArkadeScript)
+	encodeTLV(buf, tlvCovclaimdPubKey, p.CovclaimdPubKey)
 	return buf.Bytes(), nil
 }
 
@@ -65,6 +92,7 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 	out := &ClaimPacket{}
 	hasCiphertext := false
 	hasArkadeScript := false
+	hasCovclaimdPubKey := false
 
 	offset := 0
 	for offset < len(data) {
@@ -89,6 +117,18 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 		case tlvArkadeScript:
 			out.ArkadeScript = val
 			hasArkadeScript = true
+		case tlvCovclaimdPubKey:
+			// Length only. Parsing the point here would undo the reason this
+			// field exists: AddressedTo compares it to a key we already know is
+			// on the curve, so bytes that are not are simply not ours.
+			if len(val) != compressedPubKeyLen {
+				return nil, fmt.Errorf(
+					"covclaimd_pub_key TLV (0x03) is %d bytes, want %d",
+					len(val), compressedPubKeyLen,
+				)
+			}
+			out.CovclaimdPubKey = val
+			hasCovclaimdPubKey = true
 		}
 	}
 
@@ -97,6 +137,9 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 	}
 	if !hasArkadeScript {
 		return nil, errors.New("missing arkade_script TLV (0x02)")
+	}
+	if !hasCovclaimdPubKey {
+		return nil, errors.New("missing covclaimd_pub_key TLV (0x03)")
 	}
 	return out, nil
 }
