@@ -49,7 +49,7 @@ func run() error {
 
 	log.WithField("version", Version).Info("starting covclaimd")
 
-	arkClient, err := clientgrpc.NewClient(cfg.ArkURL)
+	arkClient, err := clientgrpc.NewClient(cfg.ArkURL, "solverd " + Version)
 	if err != nil {
 		return fmt.Errorf("failed to connect to arkd: %w", err)
 	}
