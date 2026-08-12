@@ -14,6 +14,13 @@
         "arkade_script": "51",
         "covclaimd_pub_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         "expected_serialized": "010001aa020001510300210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+      },
+      {
+        "name": "single-byte fields with 03 key",
+        "ciphertext": "aa",
+        "arkade_script": "51",
+        "covclaimd_pub_key": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "expected_serialized": "010001aa020001510300210379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
       }
     ],
     "invalid_serialize": [
