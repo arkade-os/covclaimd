@@ -1,4 +1,7 @@
-FROM golang:1.26.4 AS builder
+# Must be >= the `go` directive in go.mod; the build runs with
+# GOTOOLCHAIN unset to `local` in CI, so an older base cannot download a
+# newer toolchain and fails outright.
+FROM golang:1.26.5 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
