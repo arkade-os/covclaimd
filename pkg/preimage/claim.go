@@ -2,6 +2,7 @@ package preimage
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -147,19 +148,45 @@ func findClaimClosure(
 	if err != nil {
 		return nil, err
 	}
+	// Counted as we go, so the failure can name which wall we hit rather than
+	// the one message that used to cover all four. "No claim closure" is the
+	// symptom of a wrong script version, a wrong preimage, and a misconfigured
+	// signer key alike, and from the outside those looked identical.
+	var conditionClosures, conditionMatches int
 	for _, c := range vtxoScript.Closures {
 		cmc, ok := c.(*script.ConditionMultisigClosure)
 		if !ok {
 			continue
 		}
+		conditionClosures++
 		if !bytes.Equal(cmc.Condition, expectedCondition) {
 			continue
 		}
+		conditionMatches++
 		if hasExactlyTwoKeys(cmc.PubKeys, serverPubKey, expectedTweaked) {
 			return cmc, nil
 		}
 	}
-	return nil, errors.New("no ConditionMultisigClosure with (serverPubKey, expectedTweaked) and matching preimage condition found in taptree")
+
+	switch {
+	case conditionClosures == 0:
+		return nil, fmt.Errorf(
+			"taptree has %d closure(s) but no ConditionMultisigClosure: not a claimable contract shape",
+			len(vtxoScript.Closures),
+		)
+	case conditionMatches == 0:
+		return nil, fmt.Errorf(
+			"none of %d ConditionMultisigClosure(s) commit to HASH160 of this preimage: wrong preimage, or a condition this version does not build",
+			conditionClosures,
+		)
+	default:
+		return nil, fmt.Errorf(
+			"%d closure(s) match the preimage condition but none is a 2-of-2 of (server %s, emulator-tweaked %s): check the configured signer key and the arkade_script the tweak was derived from",
+			conditionMatches,
+			hex.EncodeToString(schnorr.SerializePubKey(serverPubKey)),
+			hex.EncodeToString(schnorr.SerializePubKey(expectedTweaked)),
+		)
+	}
 }
 
 func hasExactlyTwoKeys(pubKeys []*btcec.PublicKey, a, b *btcec.PublicKey) bool {

@@ -46,6 +46,7 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 	out := tx.UnsignedTx.TxOut[i]
 	po := tx.Outputs[i]
 	if len(po.TaprootTapTree) == 0 {
+		c.log.WithField("vout", i).Debug("preimage output carries no taptree")
 		return nil, false
 	}
 
@@ -59,18 +60,31 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 		c.log.WithError(err).Debug("preimage taptree.Decode failed")
 		return nil, false
 	}
+	// Every decline below is correct. Declining SILENTLY is not: this is the
+	// last thing standing between a revealed preimage and a claim, and when it
+	// says nothing the only way to find out why is to read this function.
+	log := c.log.WithField("vout", i)
 	if _, err := findClaimClosure(vs, c.cfg.SignerPubKey, expectedTweaked, preimg); err != nil {
+		log.WithError(err).Debug("preimage claim closure not found")
 		return nil, false
 	}
 	tapKey, _, err := vs.TapTree()
 	if err != nil {
+		log.WithError(err).Debug("preimage taptree key derivation failed")
 		return nil, false
 	}
 	expectedPk, err := script.P2TRScript(tapKey)
 	if err != nil {
+		log.WithError(err).Debug("preimage P2TR script build failed")
 		return nil, false
 	}
 	if !bytes.Equal(out.PkScript, expectedPk) {
+		// The taptree parses and holds our claim leaf, but the output was not
+		// funded to the key it derives — so both scripts are worth having.
+		log.WithFields(logrus.Fields{
+			"output_pkscript":  hex.EncodeToString(out.PkScript),
+			"derived_pkscript": hex.EncodeToString(expectedPk),
+		}).Debug("preimage taptree does not derive this output's pkScript")
 		return nil, false
 	}
 
