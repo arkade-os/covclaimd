@@ -13,13 +13,30 @@ import (
 const PacketType uint8 = 0x04
 
 const (
-	tlvCiphertext   byte = 0x01
-	tlvArkadeScript byte = 0x02
+	tlvCiphertext      byte = 0x01
+	tlvArkadeScript    byte = 0x02
+	tlvCovclaimdPubKey byte = 0x03
 )
 
+// compressedPubKeyLen is the serialized length of the committed covclaimd key.
+const compressedPubKeyLen = 33
+
 type ClaimPacket struct {
-	Ciphertext   []byte // encrypted preimage or whatever allowing the claim
-	ArkadeScript []byte
+	Ciphertext      []byte // encrypted preimage or whatever allowing the claim
+	ArkadeScript    []byte
+	CovclaimdPubKey []byte
+}
+
+// AddressedTo reports whether the packet names pub (compressed) as the
+// covclaimd meant to open it.
+func (p *ClaimPacket) AddressedTo(pub []byte) bool {
+	return len(pub) == compressedPubKeyLen && bytes.Equal(p.CovclaimdPubKey, pub)
+}
+
+// SealedToAnother reports whether the packet names a covclaimd that is not pub,
+// which is the only case worth declining before decryption.
+func (p *ClaimPacket) SealedToAnother(pub []byte) bool {
+	return len(p.CovclaimdPubKey) > 0 && !p.AddressedTo(pub)
 }
 
 func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
@@ -47,9 +64,16 @@ func (p *ClaimPacket) Serialize() ([]byte, error) {
 	if len(p.ArkadeScript) == 0 {
 		return nil, errors.New("arkade_script must not be empty")
 	}
+	if len(p.CovclaimdPubKey) != compressedPubKeyLen {
+		return nil, fmt.Errorf(
+			"covclaimd_pub_key must be %d bytes, got %d",
+			compressedPubKeyLen, len(p.CovclaimdPubKey),
+		)
+	}
 	buf := &bytes.Buffer{}
 	encodeTLV(buf, tlvCiphertext, p.Ciphertext)
 	encodeTLV(buf, tlvArkadeScript, p.ArkadeScript)
+	encodeTLV(buf, tlvCovclaimdPubKey, p.CovclaimdPubKey)
 	return buf.Bytes(), nil
 }
 
@@ -89,6 +113,14 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 		case tlvArkadeScript:
 			out.ArkadeScript = val
 			hasArkadeScript = true
+		case tlvCovclaimdPubKey:
+			if len(val) != compressedPubKeyLen {
+				return nil, fmt.Errorf(
+					"covclaimd_pub_key TLV (0x03) is %d bytes, want %d",
+					len(val), compressedPubKeyLen,
+				)
+			}
+			out.CovclaimdPubKey = val
 		}
 	}
 

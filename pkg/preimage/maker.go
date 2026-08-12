@@ -27,5 +27,9 @@ func BuildPacket(
 	if err != nil {
 		return nil, fmt.Errorf("encrypt preimage: %w", err)
 	}
-	return (&ClaimPacket{Ciphertext: ciphertext, ArkadeScript: arkadeScript}).ToPacket()
+	return (&ClaimPacket{
+		Ciphertext:      ciphertext,
+		ArkadeScript:    arkadeScript,
+		CovclaimdPubKey: covclaimdPubKey.SerializeCompressed(),
+	}).ToPacket()
 }

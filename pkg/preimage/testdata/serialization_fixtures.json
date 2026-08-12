@@ -5,13 +5,22 @@
         "name": "ciphertext and enforce_pay_to arkade script",
         "ciphertext": "deadbeef",
         "arkade_script": "cd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a2",
-        "expected_serialized": "010004deadbeef02002bcd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a2"
+        "covclaimd_pub_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "expected_serialized": "010004deadbeef02002bcd76d15188201b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f88cfcdc9a20300210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
       },
       {
         "name": "single-byte fields",
         "ciphertext": "aa",
         "arkade_script": "51",
-        "expected_serialized": "010001aa02000151"
+        "covclaimd_pub_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "expected_serialized": "010001aa020001510300210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+      },
+      {
+        "name": "single-byte fields with 03 key",
+        "ciphertext": "aa",
+        "arkade_script": "51",
+        "covclaimd_pub_key": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "expected_serialized": "010001aa020001510300210379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
       }
     ],
     "invalid_serialize": [
@@ -19,13 +28,29 @@
         "name": "empty ciphertext",
         "ciphertext": "",
         "arkade_script": "51",
+        "covclaimd_pub_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         "expected_error": "ciphertext must not be empty"
       },
       {
         "name": "empty arkade script",
         "ciphertext": "aa",
         "arkade_script": "",
+        "covclaimd_pub_key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         "expected_error": "arkade_script must not be empty"
+      },
+      {
+        "name": "missing covclaimd pubkey",
+        "ciphertext": "aa",
+        "arkade_script": "51",
+        "covclaimd_pub_key": "",
+        "expected_error": "covclaimd_pub_key must be 33 bytes, got 0"
+      },
+      {
+        "name": "uncompressed covclaimd pubkey",
+        "ciphertext": "aa",
+        "arkade_script": "51",
+        "covclaimd_pub_key": "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+        "expected_error": "covclaimd_pub_key must be 33 bytes, got 65"
       }
     ],
     "invalid_deserialize": [
@@ -48,6 +73,16 @@
         "name": "missing ciphertext TLV",
         "data": "02000151",
         "expected_error": "missing ciphertext TLV"
+      },
+      {
+        "name": "covclaimd pubkey TLV wrong length",
+        "data": "010001aa02000151030002aabb",
+        "expected_error": "covclaimd_pub_key TLV (0x03) is 2 bytes, want 33"
+      },
+      {
+        "name": "covclaimd pubkey TLV one byte short",
+        "data": "010001aa0200015103002079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "expected_error": "covclaimd_pub_key TLV (0x03) is 32 bytes, want 33"
       },
       {
         "name": "only unknown TLV types",

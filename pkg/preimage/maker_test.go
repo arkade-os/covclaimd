@@ -38,6 +38,21 @@ func TestBuildPacket_RoundTrip(t *testing.T) {
 	expectedScript, err := preimage.EnforcePayTo(receiver)
 	require.NoError(t, err)
 	assert.Equal(t, expectedScript, decoded.ArkadeScript)
+
+	// The committed key must be the one the ciphertext was actually sealed to,
+	// not merely well-formed: the packet is otherwise addressed to a covclaimd
+	// that cannot open it, and no claim is ever made.
+	assert.Equal(t, covclaimd.PubKey().SerializeCompressed(), decoded.CovclaimdPubKey)
+	assert.True(t, decoded.AddressedTo(covclaimd.PubKey().SerializeCompressed()))
+
+	// The ciphertext stays a pure ECIES blob — ephPub(33) || nonce(12) ||
+	// ct+tag(48). Carrying the recipient in its own TLV is what keeps this
+	// number 93 and Decrypt unaware that any of this happened.
+	assert.Len(t, decoded.Ciphertext, 93)
+
+	other, err := btcec.NewPrivateKey()
+	require.NoError(t, err)
+	assert.False(t, decoded.AddressedTo(other.PubKey().SerializeCompressed()))
 }
 
 func TestBuildPacket_ValidatesInputs(t *testing.T) {

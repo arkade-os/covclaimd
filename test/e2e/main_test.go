@@ -110,7 +110,7 @@ func runCovclaimd(
 		return fmt.Errorf("parse emulator pubkey: %w", err)
 	}
 
-	arkClient, err := clientgrpc.NewClient(cfg.ArkURL)
+	arkClient, err := clientgrpc.NewClient(cfg.ArkURL, "covclaimd-e2e")
 	if err != nil {
 		return fmt.Errorf("connect to arkd: %w", err)
 	}
