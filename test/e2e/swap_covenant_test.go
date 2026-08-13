@@ -57,6 +57,7 @@ func TestSwapCovenantAsIsNotClaimable(t *testing.T) {
 	_, _, err = preimage.BuildClaim(&preimage.MatchedClaim{
 		Outpoint: wire.OutPoint{Hash: chainhash.Hash{}, Index: 0},
 		Amount:   swapAmount,
+		SourceTx: wire.NewMsgTx(3),
 		Credentials: preimage.ClaimCredentials{
 			Preimage:     preimg,
 			ArkadeScript: arkadeScript,
