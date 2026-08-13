@@ -91,6 +91,7 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 	return &MatchedClaim{
 		Outpoint: wire.OutPoint{Hash: tx.UnsignedTx.TxHash(), Index: uint32(i)},
 		Amount:   uint64(out.Value),
+		SourceTx: tx.UnsignedTx.Copy(),
 		Credentials: ClaimCredentials{
 			Preimage:     preimg,
 			ArkadeScript: pkt.ArkadeScript,

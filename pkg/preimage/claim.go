@@ -29,8 +29,9 @@ type ClaimCredentials struct {
 }
 
 type MatchedClaim struct {
-	Outpoint    wire.OutPoint
-	Amount      uint64
+	Outpoint wire.OutPoint
+	Amount   uint64
+	SourceTx    *wire.MsgTx
 	Credentials ClaimCredentials
 }
 
@@ -41,6 +42,9 @@ func BuildClaim(
 ) (*psbt.Packet, []*psbt.Packet, error) {
 	if matched == nil {
 		return nil, nil, errors.New("matched is nil")
+	}
+	if matched.SourceTx == nil {
+		return nil, nil, errors.New("matched has no source tx: cannot prove the claimed prevout to the emulator")
 	}
 	creds := matched.Credentials
 	if len(creds.Preimage) != preimageSize {
@@ -120,6 +124,12 @@ func BuildClaim(
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build offchain txs: %w", err)
+	}
+
+	if err := txutils.SetArkPsbtField(
+		arkTx, 0, arkade.PrevArkTxField, *matched.SourceTx,
+	); err != nil {
+		return nil, nil, fmt.Errorf("set prev ark tx on ark tx: %w", err)
 	}
 
 	preimageWitness := wire.TxWitness{slices.Clone(creds.Preimage)}

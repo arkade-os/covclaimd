@@ -189,6 +189,7 @@ func (p *RevealPlugin) matchRegistered(tx *psbt.Packet) (*MatchedClaim, bool) {
 		return &MatchedClaim{
 			Outpoint: wire.OutPoint{Hash: tx.UnsignedTx.TxHash(), Index: uint32(i)},
 			Amount:   uint64(out.Value),
+			SourceTx: tx.UnsignedTx.Copy(),
 			Credentials: ClaimCredentials{
 				Preimage:     preimg,
 				ArkadeScript: reg.packet.ArkadeScript,
