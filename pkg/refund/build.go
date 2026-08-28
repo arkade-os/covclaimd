@@ -48,6 +48,33 @@ type MatchedRefund struct {
 	Credentials RefundCredentials
 }
 
+// locateRefundClosure decodes creds.Taptree and returns both the decoded
+// vtxo script and the matched non-interactive refund-without-receiver
+// closure, re-deriving the expected cosigner key the same way the leaf
+// itself was built. BuildRefund and Refunder's maturity pre-check both go
+// through this instead of each finding the leaf their own way, so the two
+// can never disagree about which closure is under consideration — in
+// particular, Refunder reads Locktime straight off the *script.CLTVMultisigClosure
+// this returns, never from a separately supplied parameter or from config,
+// so there is no second copy of that value that could drift from the one the
+// tapscript itself enforces.
+func locateRefundClosure(
+	creds RefundCredentials, serverPubKey, emulatorPubKey *btcec.PublicKey,
+) (*script.TapscriptsVtxoScript, *script.CLTVMultisigClosure, error) {
+	vtxoScript := &script.TapscriptsVtxoScript{}
+	if err := vtxoScript.Decode(creds.Taptree); err != nil {
+		return nil, nil, fmt.Errorf("decode taptree: %w", err)
+	}
+	expectedCosigner := arkade.ComputeArkadeScriptPublicKey(
+		emulatorPubKey, arkade.ArkadeScriptHash(creds.ArkadeScript),
+	)
+	closure, err := FindRefundClosure(vtxoScript, serverPubKey, expectedCosigner)
+	if err != nil {
+		return nil, nil, err
+	}
+	return vtxoScript, closure, nil
+}
+
 // BuildRefund assembles the ark and checkpoint txs that spend the
 // nonInteractiveRefundWithoutReceiver leaf, paying back to the sender
 // pkScript the covenant enforces.
@@ -70,13 +97,15 @@ type MatchedRefund struct {
 // Condition* closure variants (ark-lib script/verify.go) — setting it would
 // be inert weight implying a condition this leaf does not have.
 //
-// BuildRefund does not check whether the CLTV has matured. That check
-// belongs to whatever already enforces CHECKLOCKTIMEVERIFY for the existing
-// refundWithoutReceiver leaf in production — the trigger for this leaf is
-// that same enforcement alone, and re-implementing a second opinion of it
-// here is exactly the "grace period" this design explicitly rejects: a local
-// guess that could disagree with the real rule instead of just being subject
-// to it.
+// BuildRefund itself still does not check whether the CLTV has matured —
+// nothing here can make an immature spend valid, since the tapscript's own
+// CHECKLOCKTIMEVERIFY is the real gate. Refunder.Refund is where a LOCAL
+// maturity pre-check lives now (reading Locktime off the same closure this
+// function locates, via locateRefundClosure): not because it changes
+// correctness, but because failing loudly and locally beats an opaque
+// rejection from downstream, and because a daemon that skips a known-immature
+// leaf instead of hammering the emulator with it produces less noise. See
+// Refunder.Refund's doc comment.
 func BuildRefund(
 	matched *MatchedRefund,
 	checkpointTapscriptBytes []byte,
@@ -95,14 +124,7 @@ func BuildRefund(
 		return nil, nil, fmt.Errorf("re-validate arkade_script: %w", err)
 	}
 
-	vtxoScript := &script.TapscriptsVtxoScript{}
-	if err := vtxoScript.Decode(creds.Taptree); err != nil {
-		return nil, nil, fmt.Errorf("decode taptree: %w", err)
-	}
-	expectedCosigner := arkade.ComputeArkadeScriptPublicKey(
-		emulatorPubKey, arkade.ArkadeScriptHash(creds.ArkadeScript),
-	)
-	refundClosure, err := FindRefundClosure(vtxoScript, serverPubKey, expectedCosigner)
+	vtxoScript, refundClosure, err := locateRefundClosure(creds, serverPubKey, emulatorPubKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find refund closure: %w", err)
 	}
