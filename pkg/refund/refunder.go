@@ -171,7 +171,12 @@ func (r *Refunder) Refund(ctx context.Context, m *MatchedRefund) (RefundOutcome,
 	}
 	log := r.log.WithField("outpoint", m.Outpoint.String())
 
-	_, closure, err := locateRefundClosure(m.Credentials, r.cfg.ServerPubKey, r.cfg.EmulatorPubKey)
+	// Located exactly once. vtxoScript and closure are reused below by
+	// buildRefundTx rather than re-derived via a second locateRefundClosure
+	// call, so the maturity check below and the transaction actually built
+	// are guaranteed to be looking at the same closure object — not just two
+	// lookups that happen to agree.
+	vtxoScript, closure, err := locateRefundClosure(m.Credentials, r.cfg.ServerPubKey, r.cfg.EmulatorPubKey)
 	if err != nil {
 		return RefundOutcome{}, fmt.Errorf("refund: find closure: %w", err)
 	}
@@ -199,9 +204,7 @@ func (r *Refunder) Refund(ctx context.Context, m *MatchedRefund) (RefundOutcome,
 		WithField("taptree_leaves", len(m.Credentials.Taptree)).
 		Debug("refund: vtxo confirmed spendable, building ark tx")
 
-	arkTx, checkpoints, err := BuildRefund(
-		m, r.cfg.CheckpointTapscript, r.cfg.ServerPubKey, r.cfg.EmulatorPubKey,
-	)
+	arkTx, checkpoints, err := buildRefundTx(m, vtxoScript, closure, r.cfg.CheckpointTapscript)
 	if err != nil {
 		return RefundOutcome{}, fmt.Errorf("refund: build: %w", err)
 	}

@@ -45,7 +45,7 @@ func matchedRefundFromFixture(t *testing.T, v fixture, amount uint64) *MatchedRe
 		Credentials: RefundCredentials{
 			ArkadeScript: v.RefundArkadeScript(),
 			Taptree:      taptree,
-			PkScript:     mustDecodeHex(t, v.Leaves.NonInteractiveRefundWithoutReceiver),
+			PkScript:     mustDecodeHex(t, v.PkScript),
 		},
 	}
 }

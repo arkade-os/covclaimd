@@ -140,7 +140,7 @@ func TestRefund_SkipsWithReasonWhenNotYetMatured(t *testing.T) {
 		Credentials: RefundCredentials{
 			ArkadeScript: v.RefundArkadeScript(),
 			Taptree:      []string{hex.EncodeToString(leafScript)},
-			PkScript:     mustDecodeHex(t, v.Leaves.NonInteractiveRefundWithoutReceiver),
+			PkScript:     mustDecodeHex(t, v.PkScript),
 		},
 	}
 

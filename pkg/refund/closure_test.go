@@ -57,6 +57,7 @@ type fixtureJSON struct {
 			EmulatorPubkey string `json:"emulatorPubkey"`
 		} `json:"nonInteractiveRefund"`
 	} `json:"options"`
+	PkScript      string        `json:"pkScript"`
 	TapTree       string        `json:"tapTree"`
 	Leaves        fixtureLeaves `json:"leaves"`
 	ArkadeScripts struct {
@@ -68,8 +69,13 @@ type fixtureJSON struct {
 // needs pre-derived at load time so callers don't have to thread errors
 // through every accessor.
 type fixture struct {
-	TapTree string
-	Leaves  fixtureLeaves
+	// PkScript is the vtxo's own P2TR output script (top-level "pkScript" in
+	// the fixture JSON) — NOT any individual leaf script. A MatchedRefund's
+	// RefundCredentials.PkScript must be built from this, hex-decoded, since
+	// that is what Refunder hands the indexer to look the vtxo up.
+	PkScript string
+	TapTree  string
+	Leaves   fixtureLeaves
 
 	serverPubKey         *btcec.PublicKey
 	emulatorPubKey       *btcec.PublicKey
@@ -117,6 +123,7 @@ func loadFixture(t *testing.T, name string) fixture {
 	cosigner := arkade.ComputeArkadeScriptPublicKey(emulator, arkade.ArkadeScriptHash(arkadeScript))
 
 	return fixture{
+		PkScript:             j.PkScript,
 		TapTree:              j.TapTree,
 		Leaves:               j.Leaves,
 		serverPubKey:         server,
@@ -207,16 +214,16 @@ func TestFindRefundClosure_ErrorsWhenTheLeafIsAbsent(t *testing.T) {
 	require.ErrorContains(t, err, "no non-interactive refund-without-receiver leaf")
 }
 
-// TestFindRefundClosure_RejectsWrongCosignerEvenWhenServerMatches locks in the
-// PubKeys[1] (cosigner) half of the comparison, which nothing above exercises.
-// On this fixture, refundWithoutReceiver is [sender, server] and the target
-// leaf is [server, cosigner], so sender != server already disambiguates at
-// index 0 alone — a mutant that deleted the cosigner comparison and matched
-// on PubKeys[0] == server alone would still pass every test above.
+// TestFindRefundClosure_RejectsWrongCosignerEvenWhenServerMatches locks in
+// the cosigner half of the comparison, which nothing above exercises. On
+// this fixture, refundWithoutReceiver is [sender, server] and the target
+// leaf is [server, cosigner], so sender != server already disambiguates on
+// its own — a matcher that checked only "is the real server one of the two
+// keys" and stopped there would still pass every test above.
 //
-// This closure's first key IS the real server; its second is an unrelated
-// key. If the cosigner check were missing, FindRefundClosure would return
-// this closure. It must instead fall through to the not-found error.
+// This closure carries the real server key plus an unrelated second key. A
+// matcher that dropped the cosigner half of the comparison would return this
+// closure. It must instead fall through to the not-found error.
 func TestFindRefundClosure_RejectsWrongCosignerEvenWhenServerMatches(t *testing.T) {
 	v := loadFixture(t, "vhtlc-v2-nine-leaf.json")
 
@@ -234,4 +241,35 @@ func TestFindRefundClosure_RejectsWrongCosignerEvenWhenServerMatches(t *testing.
 
 	_, err = FindRefundClosure(vtxo, v.ServerPubKey(), v.RefundCosigner())
 	require.ErrorContains(t, err, "no non-interactive refund-without-receiver leaf")
+}
+
+// TestFindRefundClosure_MatchesRegardlessOfKeyOrder proves the match is on
+// the SET {server, cosigner}, not on which position either occupies. The
+// real leaf happens to emit [server, cosigner] — this builds the same two
+// keys the other way around, [cosigner, server], and must still be found.
+//
+// Which position disambiguates is an accident of the present leaf set, not
+// a property worth depending on (the PR body for this package says exactly
+// that about the claim side's own matcher, findClaimClosure /
+// HasExactlyTwoKeys — this test is what makes it true here too). If
+// FindRefundClosure required server at PubKeys[0], an SDK that ever emitted
+// these two keys in the other order, or any decoder that normalized key
+// order, would make the leaf silently unfindable: not a build error, not a
+// loud runtime error, just "no non-interactive refund-without-receiver leaf
+// in taptree" and a refund that never gets pushed.
+func TestFindRefundClosure_MatchesRegardlessOfKeyOrder(t *testing.T) {
+	v := loadFixture(t, "vhtlc-v2-nine-leaf.json")
+
+	swapped := &script.TapscriptsVtxoScript{Closures: []script.Closure{
+		&script.CLTVMultisigClosure{
+			MultisigClosure: script.MultisigClosure{
+				PubKeys: []*btcec.PublicKey{v.RefundCosigner(), v.ServerPubKey()},
+			},
+			Locktime: 1000,
+		},
+	}}
+
+	got, err := FindRefundClosure(swapped, v.ServerPubKey(), v.RefundCosigner())
+	require.NoError(t, err)
+	require.NotNil(t, got)
 }

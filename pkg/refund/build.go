@@ -100,8 +100,8 @@ func locateRefundClosure(
 // BuildRefund itself still does not check whether the CLTV has matured —
 // nothing here can make an immature spend valid, since the tapscript's own
 // CHECKLOCKTIMEVERIFY is the real gate. Refunder.Refund is where a LOCAL
-// maturity pre-check lives now (reading Locktime off the same closure this
-// function locates, via locateRefundClosure): not because it changes
+// maturity pre-check lives now (reading Locktime off the same closure OBJECT
+// used to build the transaction — see buildRefundTx): not because it changes
 // correctness, but because failing loudly and locally beats an opaque
 // rejection from downstream, and because a daemon that skips a known-immature
 // leaf instead of hammering the emulator with it produces less noise. See
@@ -114,6 +114,30 @@ func BuildRefund(
 	if matched == nil {
 		return nil, nil, errors.New("matched is nil")
 	}
+
+	vtxoScript, refundClosure, err := locateRefundClosure(matched.Credentials, serverPubKey, emulatorPubKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("find refund closure: %w", err)
+	}
+
+	return buildRefundTx(matched, vtxoScript, refundClosure, checkpointTapscriptBytes)
+}
+
+// buildRefundTx does the actual transaction assembly once the closure — and
+// the vtxo script it was found in — is already known. Split out of
+// BuildRefund so Refunder.Refund can pass through the EXACT closure object
+// its maturity pre-check already located via locateRefundClosure, instead of
+// calling locateRefundClosure a second time and relying on two independent
+// lookups over the same inputs happening to agree. They are deterministic
+// today, so they always would — but "cannot disagree" is a stronger
+// guarantee than "happens not to," and this makes it true by construction:
+// there is only ever one closure object in play for a given Refund call.
+func buildRefundTx(
+	matched *MatchedRefund,
+	vtxoScript *script.TapscriptsVtxoScript,
+	refundClosure *script.CLTVMultisigClosure,
+	checkpointTapscriptBytes []byte,
+) (*psbt.Packet, []*psbt.Packet, error) {
 	if matched.SourceTx == nil {
 		return nil, nil, errors.New("matched has no source tx: cannot prove the refunded prevout to the emulator")
 	}
@@ -122,11 +146,6 @@ func BuildRefund(
 	senderPkScript, err := preimage.ValidateArkadeScript(creds.ArkadeScript)
 	if err != nil {
 		return nil, nil, fmt.Errorf("re-validate arkade_script: %w", err)
-	}
-
-	vtxoScript, refundClosure, err := locateRefundClosure(creds, serverPubKey, emulatorPubKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("find refund closure: %w", err)
 	}
 
 	revealedScript, err := refundClosure.Script()
