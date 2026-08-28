@@ -241,3 +241,19 @@ func TestRefund_SubmitsTheBuiltTransactionOnSuccess(t *testing.T) {
 	require.NotEmpty(t, gotTx)
 	require.Len(t, gotCheckpoints, 1)
 }
+
+// RefundOutcome.Pushed is the one obvious, hard-to-misuse way to read an
+// outcome: it must report ok=true with the real txid for a pushed refund,
+// and ok=false with an empty txid for a skipped one — never the other way
+// round, and never true for an empty txid.
+func TestRefundOutcome_Pushed(t *testing.T) {
+	pushed := RefundOutcome{Txid: "abc123"}
+	txid, ok := pushed.Pushed()
+	require.True(t, ok)
+	require.Equal(t, "abc123", txid)
+
+	skipped := RefundOutcome{Skipped: NothingAtScript}
+	txid, ok = skipped.Pushed()
+	require.False(t, ok)
+	require.Empty(t, txid)
+}

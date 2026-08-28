@@ -48,7 +48,8 @@ func validateConfig(cfg Config) error {
 
 // RefundOutcome is the result of a Refund attempt: either it pushed (Txid
 // set) or it deliberately did nothing (Skipped set, naming why). Exactly one
-// of the two is ever set.
+// of the two is ever set — call Pushed rather than reading the fields
+// directly, since Go has no sum type to enforce that invariant for you.
 //
 // Mirrors intent-solver's own `RefundOutcome = { txid } | { skipped }`
 // (src/ops/refunds.ts) rather than inventing a second shape for the same
@@ -63,6 +64,18 @@ func validateConfig(cfg Config) error {
 type RefundOutcome struct {
 	Txid    string
 	Skipped string
+}
+
+// Pushed reports whether a refund transaction was actually broadcast, and
+// its txid if so. A false return means the refund was skipped for a benign
+// reason (already spent, or not yet mature) — see Skipped for which.
+//
+// This is the one obvious, hard-to-misuse way to read a RefundOutcome: the
+// struct's two fields cannot stop a caller from reading Txid on a skip and
+// silently getting "", or from misreading "no error" as "pushed" without
+// checking further. Pushed forces both questions to be asked together.
+func (o RefundOutcome) Pushed() (txid string, ok bool) {
+	return o.Txid, o.Txid != ""
 }
 
 // NothingAtScript mirrors intent-solver's NOTHING_AT_SCRIPT: the vtxo at the
