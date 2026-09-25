@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
@@ -116,8 +117,19 @@ func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool
 	return m, true
 }
 
-func (c *claimer) claim(ctx context.Context, m *MatchedClaim) error {
+func (c *claimer) claim(ctx context.Context, m *MatchedClaim) (claimErr error) {
 	log := c.log.WithField("outpoint", m.Outpoint.String())
+	started := time.Now()
+	var buildMs, encodeMs, submitMs int64
+	defer func() {
+		log.WithFields(logrus.Fields{
+			"build_ms":  buildMs,
+			"encode_ms": encodeMs,
+			"submit_ms": submitMs,
+			"total_ms":  time.Since(started).Milliseconds(),
+			"success":   claimErr == nil,
+		}).Info("preimage claim timing")
+	}()
 
 	log.WithField("amount", m.Amount).
 		WithField("arkade_script_hex", hex.EncodeToString(m.Credentials.ArkadeScript)).
@@ -129,10 +141,12 @@ func (c *claimer) claim(ctx context.Context, m *MatchedClaim) error {
 	arkTx, checkpoints, err := BuildClaim(
 		m, c.cfg.CheckpointTapscript, c.cfg.SignerPubKey, c.cfg.EmulatorPubKey,
 	)
+	buildMs = time.Since(started).Milliseconds()
 	if err != nil {
 		return err
 	}
 
+	encodeStarted := time.Now()
 	arkTxB64, err := arkTx.B64Encode()
 	if err != nil {
 		return err
@@ -145,13 +159,14 @@ func (c *claimer) claim(ctx context.Context, m *MatchedClaim) error {
 		}
 		cpB64[i] = b64
 	}
+	encodeMs = time.Since(encodeStarted).Milliseconds()
 
 	log.WithField("txid", arkTx.UnsignedTx.TxHash().String()).
-		WithField("tx", arkTxB64).
-		WithField("checkpoints", cpB64).
 		Debug("claim transaction built, submitting")
 
+	submitStarted := time.Now()
 	_, _, err = c.cfg.Emulator.SubmitTx(ctx, arkTxB64, cpB64)
+	submitMs = time.Since(submitStarted).Milliseconds()
 	return err
 }
 
