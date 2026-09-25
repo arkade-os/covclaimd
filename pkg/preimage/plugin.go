@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
@@ -68,6 +69,7 @@ func (p *plugin) Filter() string {
 }
 
 func (p *plugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
+	started := time.Now()
 	if tx == nil || tx.UnsignedTx == nil {
 		return nil, false
 	}
@@ -84,7 +86,15 @@ func (p *plugin) Match(ctx context.Context, tx *psbt.Packet) (any, bool) {
 	if !ok {
 		return nil, false
 	}
-	return p.gateSpendable(ctx, claim)
+	gateStarted := time.Now()
+	matched, spendable := p.gateSpendable(ctx, claim)
+	p.log.WithFields(logrus.Fields{
+		"outpoint":   claim.Outpoint.String(),
+		"match_ms":   time.Since(started).Milliseconds(),
+		"indexer_ms": time.Since(gateStarted).Milliseconds(),
+		"spendable":  spendable,
+	}).Info("preimage claim match timing")
+	return matched, spendable
 }
 
 func (p *plugin) Solve(ctx context.Context, intent any) {
