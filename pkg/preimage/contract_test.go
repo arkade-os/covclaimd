@@ -10,10 +10,10 @@ import (
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	arkade "github.com/arkade-os/emulator/pkg/arkade"
+	"github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +61,7 @@ func TestEnforcePayTo_RejectsNonP2TR(t *testing.T) {
 
 func TestPreimageCondition_Shape(t *testing.T) {
 	preimage := bytes.Repeat([]byte{0x42}, 32)
-	hash := btcutil.Hash160(preimage)
+	hash := address.Hash160(preimage)
 
 	cond, err := preimageCondition(hash)
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestPreimageCondition_Shape(t *testing.T) {
 
 func TestPreimageCondition_EnforcesPreimageSize(t *testing.T) {
 	preimage := bytes.Repeat([]byte{0x42}, 32)
-	cond, err := preimageCondition(btcutil.Hash160(preimage))
+	cond, err := preimageCondition(address.Hash160(preimage))
 	require.NoError(t, err)
 
 	ok, err := script.EvaluateScriptToBool(cond, wire.TxWitness{preimage})
@@ -88,7 +88,7 @@ func TestPreimageCondition_EnforcesPreimageSize(t *testing.T) {
 
 	for _, size := range []int{0, 20, 31, 33, 64} {
 		short := bytes.Repeat([]byte{0x42}, size)
-		cond, err := preimageCondition(btcutil.Hash160(short))
+		cond, err := preimageCondition(address.Hash160(short))
 		require.NoError(t, err)
 		ok, err := script.EvaluateScriptToBool(cond, wire.TxWitness{short})
 		assert.False(t, ok, "preimage of %d bytes must not satisfy the condition", size)
@@ -107,7 +107,7 @@ func TestCovenantClaimClosure_Determinism(t *testing.T) {
 	receiver := fixedReceiver(t)
 	server := fixedPub(t, strings.Repeat("02", 32))
 	emulator := fixedPub(t, strings.Repeat("03", 32))
-	preimageHash := btcutil.Hash160(bytes.Repeat([]byte{0x42}, 32))
+	preimageHash := address.Hash160(bytes.Repeat([]byte{0x42}, 32))
 
 	a, err := CovenantClaimClosure(preimageHash, receiver, server, emulator)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestCovenantClaimClosure_Determinism(t *testing.T) {
 
 func TestCovenantClaimClosure_NilPubkeyRejected(t *testing.T) {
 	receiver := fixedReceiver(t)
-	preimageHash := btcutil.Hash160(bytes.Repeat([]byte{0x42}, 32))
+	preimageHash := address.Hash160(bytes.Repeat([]byte{0x42}, 32))
 
 	_, err := CovenantClaimClosure(preimageHash, receiver, nil, fixedPub(t, strings.Repeat("03", 32)))
 	assert.Error(t, err)
@@ -135,7 +135,7 @@ func TestCovenantClaimClosure_Shape(t *testing.T) {
 	receiver := fixedReceiver(t)
 	server := fixedPub(t, strings.Repeat("02", 32))
 	emulator := fixedPub(t, strings.Repeat("03", 32))
-	preimageHash := btcutil.Hash160(bytes.Repeat([]byte{0x42}, 32))
+	preimageHash := address.Hash160(bytes.Repeat([]byte{0x42}, 32))
 
 	c, err := CovenantClaimClosure(preimageHash, receiver, server, emulator)
 	require.NoError(t, err)

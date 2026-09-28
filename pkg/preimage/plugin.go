@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
-	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
+	"github.com/arkade-os/covclaimd/pkg/executor"
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
-	"github.com/arkade-os/solver/pkg/executor"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/btcsuite/btcd/psbt/v2"
 	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
-	Indexer             indexer.Indexer
+	Indexer             clientlib.Indexer
 	Emulator            emulatorclient.TransportClient
 	SecretKey           *btcec.PrivateKey
 	EmulatorPubKey      *btcec.PublicKey

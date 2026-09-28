@@ -12,10 +12,9 @@ import (
 	"testing"
 	"time"
 
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
 	"github.com/arkade-os/arkd/pkg/client-lib/client"
-	clientgrpc "github.com/arkade-os/arkd/pkg/client-lib/client/grpc"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
-	indexergrpc "github.com/arkade-os/arkd/pkg/client-lib/indexer/grpc"
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
 	"github.com/btcsuite/btcd/btcec/v2"
 	log "github.com/sirupsen/logrus"
@@ -25,9 +24,9 @@ import (
 	covclaimdv1 "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1"
 	"github.com/arkade-os/covclaimd/internal/config"
 	grpcservice "github.com/arkade-os/covclaimd/internal/interface/grpc"
+	"github.com/arkade-os/covclaimd/pkg/executor"
+	"github.com/arkade-os/covclaimd/pkg/executor/arkdsource"
 	"github.com/arkade-os/covclaimd/pkg/preimage"
-	"github.com/arkade-os/solver/pkg/executor"
-	"github.com/arkade-os/solver/pkg/executor/arkdsource"
 )
 
 const (
@@ -110,13 +109,13 @@ func runCovclaimd(
 		return fmt.Errorf("parse emulator pubkey: %w", err)
 	}
 
-	arkClient, err := clientgrpc.NewClient(cfg.ArkURL, "covclaimd-e2e")
+	arkClient, err := client.NewClient(cfg.ArkURL, "covclaimd-e2e")
 	if err != nil {
 		return fmt.Errorf("connect to arkd: %w", err)
 	}
 	defer arkClient.Close()
 
-	idxClient, err := indexergrpc.NewClient(cfg.ArkURL)
+	idxClient, err := indexer.NewClient(cfg.ArkURL)
 	if err != nil {
 		return fmt.Errorf("connect to indexer: %w", err)
 	}
@@ -159,9 +158,9 @@ func runCovclaimd(
 
 func buildClaimerConfig(
 	cfg *config.Config,
-	idx indexer.Indexer,
+	idx clientlib.Indexer,
 	emulator emulatorclient.TransportClient,
-	info client.Info,
+	info clientlib.Info,
 	emulatorPub *btcec.PublicKey,
 	logger log.FieldLogger,
 ) (preimage.Config, error) {

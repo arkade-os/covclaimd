@@ -13,9 +13,9 @@ import (
 	arklib "github.com/arkade-os/arkd/pkg/ark-lib"
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
-	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
-	"github.com/btcsuite/btcd/btcutil/psbt"
-	"github.com/btcsuite/btcd/wire"
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
+	"github.com/btcsuite/btcd/psbt/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 )
 
 var ErrRegistryFull = errors.New("registration capacity reached, retry later")
@@ -121,8 +121,8 @@ func (p *RevealPlugin) register(key string, pkt ClaimPacket, taptree []string) e
 
 func (p *RevealPlugin) claimIfAlreadyFunded(ctx context.Context, pkScriptHex string) {
 	resp, err := p.cfg.Indexer.GetVtxos(ctx,
-		indexer.WithScripts([]string{pkScriptHex}),
-		indexer.WithSpendableOnly(),
+		clientlib.WithScripts([]string{pkScriptHex}),
+		clientlib.WithSpendableOnly(),
 	)
 	if err != nil || len(resp.Vtxos) == 0 {
 		return

@@ -9,10 +9,10 @@ import (
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
-	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil/psbt"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/psbt/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/sirupsen/logrus"
 )
 
@@ -104,8 +104,8 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 
 func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool) {
 	resp, err := c.cfg.Indexer.GetVtxos(ctx,
-		indexer.WithScripts([]string{hex.EncodeToString(m.Credentials.PkScript)}),
-		indexer.WithSpendableOnly(),
+		clientlib.WithScripts([]string{hex.EncodeToString(m.Credentials.PkScript)}),
+		clientlib.WithSpendableOnly(),
 	)
 	if err != nil {
 		c.log.WithError(err).Debug("vtxo spendable check failed")

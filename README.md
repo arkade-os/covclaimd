@@ -19,7 +19,7 @@ A maker who wants the bot to claim a VTXO for them:
    on the funding output.
 
 `covclaimd` then runs a match → solve loop driven by the
-[`solver`](https://github.com/arkade-os/solver) executor over the arkd source:
+executor in `pkg/executor` (vendored from [`solver`](https://github.com/arkade-os/solver)) over the arkd source:
 
 - **Match** — for each streamed tx: parse the Arkade extension, find a
   `ClaimPacket`, decrypt the preimage, validate the embedded arkade script
