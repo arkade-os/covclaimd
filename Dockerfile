@@ -1,4 +1,4 @@
-FROM golang:1.26.5 AS builder
+FROM golang:1.26.6 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
     -o /app/bin/covclaimd ./cmd/covclaimd
 
-FROM alpine:3.20
+FROM alpine:3.24 AS runtime
 
 RUN apk update && apk upgrade
 
