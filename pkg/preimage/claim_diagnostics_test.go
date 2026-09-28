@@ -7,8 +7,8 @@ import (
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/emulator/pkg/arkade"
+	"github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func TestFindClaimClosure_NamesTheCause(t *testing.T) {
 	require.NoError(t, err)
 	tweaked := arkade.ComputeArkadeScriptPublicKey(emulator, arkade.ArkadeScriptHash(enforcement))
 
-	claimable, err := CovenantClaimClosure(btcutil.Hash160(preimage), receiver, server, emulator)
+	claimable, err := CovenantClaimClosure(address.Hash160(preimage), receiver, server, emulator)
 	require.NoError(t, err)
 
 	t.Run("no condition closure at all", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestFindClaimClosure_NamesTheCause(t *testing.T) {
 
 	t.Run("condition closures exist but none commits to this preimage", func(t *testing.T) {
 		other, err := CovenantClaimClosure(
-			btcutil.Hash160(bytes.Repeat([]byte{0x99}, 32)), receiver, server, emulator,
+			address.Hash160(bytes.Repeat([]byte{0x99}, 32)), receiver, server, emulator,
 		)
 		require.NoError(t, err)
 		vs := &script.TapscriptsVtxoScript{Closures: []script.Closure{other}}

@@ -14,17 +14,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
 	"github.com/arkade-os/arkd/pkg/client-lib/client"
-	clientgrpc "github.com/arkade-os/arkd/pkg/client-lib/client/grpc"
 	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
-	indexergrpc "github.com/arkade-os/arkd/pkg/client-lib/indexer/grpc"
 	covclaimdv1 "github.com/arkade-os/covclaimd/api-spec/protobuf/gen/go/covclaimd/v1"
 	"github.com/arkade-os/covclaimd/internal/config"
 	grpcservice "github.com/arkade-os/covclaimd/internal/interface/grpc"
+	"github.com/arkade-os/covclaimd/pkg/executor"
+	"github.com/arkade-os/covclaimd/pkg/executor/arkdsource"
 	"github.com/arkade-os/covclaimd/pkg/preimage"
 	emulatorclient "github.com/arkade-os/emulator/pkg/client"
-	"github.com/arkade-os/solver/pkg/executor"
-	"github.com/arkade-os/solver/pkg/executor/arkdsource"
 )
 
 var Version = "dev"
@@ -49,13 +48,13 @@ func run() error {
 
 	log.WithField("version", Version).Info("starting covclaimd")
 
-	arkClient, err := clientgrpc.NewClient(cfg.ArkURL, "solverd " + Version)
+	arkClient, err := client.NewClient(cfg.ArkURL, "solverd "+Version)
 	if err != nil {
 		return fmt.Errorf("failed to connect to arkd: %w", err)
 	}
 	defer arkClient.Close()
 
-	idxClient, err := indexergrpc.NewClient(cfg.ArkURL)
+	idxClient, err := indexer.NewClient(cfg.ArkURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to indexer: %w", err)
 	}
@@ -140,9 +139,9 @@ func run() error {
 
 func buildClaimerConfig(
 	cfg *config.Config,
-	idx indexer.Indexer,
+	idx clientlib.Indexer,
 	emulator emulatorclient.TransportClient,
-	info client.Info,
+	info clientlib.Info,
 	emulatorPub *btcec.PublicKey,
 ) (preimage.Config, error) {
 	checkpointBytes, err := hex.DecodeString(info.CheckpointTapscript)

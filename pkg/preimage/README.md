@@ -81,11 +81,11 @@ false positive only costs the byte compare in step 1a.
 
 **This filter is inert, and must stay inert until every emitter stamps the
 key.** `arkdsource.Subscribe` discards the filter today, so `Filter()` has no
-effect at all; it only becomes live once covclaimd's `solver` dependency
-carries the wiring. The expression selects on the `0x03` TLV, so turning it on
+effect at all; it only becomes live once `pkg/executor/arkdsource`
+is wired with `WithSubscriptions`. The expression selects on the `0x03` TLV, so turning it on
 while something is still stamping the two-TLV shape would silently drop those
 packets — the one ordering constraint here is that the emitter ships the key
-before that dependency bump.
+before that wiring lands.
 
 The reveal plugin still returns `""`. It matches on the funding output's
 pkScript, which is a script subscription rather than an expression, and the

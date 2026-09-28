@@ -16,18 +16,15 @@ import (
 
 	arklib "github.com/arkade-os/arkd/pkg/ark-lib"
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
-	"github.com/arkade-os/arkd/pkg/ark-lib/offchain"
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
-	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
-	clientTypes "github.com/arkade-os/arkd/pkg/client-lib/types"
-	arksdk "github.com/arkade-os/go-sdk"
-	sdkcontract "github.com/arkade-os/go-sdk/contract"
-	sdktypes "github.com/arkade-os/go-sdk/types"
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
+	offchaintx "github.com/arkade-os/arkd/pkg/client-lib/offchain-tx"
+	clientwallet "github.com/arkade-os/arkd/pkg/client-wallet"
+	walletidentity "github.com/arkade-os/arkd/pkg/client-wallet/identity"
+	inmemorystore "github.com/arkade-os/arkd/pkg/client-wallet/identity/store/inmemory"
+	walletstore "github.com/arkade-os/arkd/pkg/client-wallet/store/inmemory"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/btcsuite/btcd/txscript/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,72 +34,45 @@ const (
 	password     = "secret"
 	arkdURL      = "localhost:7170"
 	arkdHTTPURL  = "http://localhost:7171"
+	explorerURL  = "http://localhost:3000"
 	emulatorAddr = "localhost:7173"
 )
 
-func setupArkClient(t *testing.T, opts ...arksdk.WalletOption) arksdk.Wallet {
+func setupArkClient(t *testing.T) clientwallet.Wallet {
 	t.Helper()
+	ctx := t.Context()
 
-	opts = append([]arksdk.WalletOption{arksdk.WithoutAutoSettle()}, opts...)
-	arkClient, err := arksdk.NewWallet(t.TempDir(), opts...)
+	idStore, err := inmemorystore.NewStore()
+	require.NoError(t, err)
+	identity, err := walletidentity.NewIdentity(idStore)
+	require.NoError(t, err)
+	configStore, err := walletstore.NewStore()
+	require.NoError(t, err)
+	arkClient, err := clientwallet.NewWallet(configStore, clientwallet.WithIdentity(identity))
 	require.NoError(t, err)
 
-	err = arkClient.Init(t.Context(), arkdURL, "", password)
-	require.NoError(t, err)
-
-	err = arkClient.Unlock(t.Context(), password)
-	require.NoError(t, err)
-
-	synced := <-arkClient.IsSynced(t.Context())
-	require.Nil(t, synced.Err)
-	require.True(t, synced.Synced)
-
+	require.NoError(t, arkClient.Init(ctx, clientwallet.InitArgs{
+		ServerUrl: arkdURL, Password: password, ExplorerURL: explorerURL,
+	}))
+	require.NoError(t, arkClient.Unlock(ctx, password))
 	t.Cleanup(arkClient.Stop)
 
 	return arkClient
 }
 
-func faucetOffchain(t *testing.T, client arksdk.Wallet, amount float64) clientTypes.Vtxo {
+func faucetOffchain(t *testing.T, client clientwallet.Wallet, amount float64) {
 	t.Helper()
 	ctx := t.Context()
 
 	note := generateNote(t, uint64(amount*1e8))
-
-	vtxoCh := client.GetVtxoEventChannel(ctx)
-
-	vtxoCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	done := make(chan clientTypes.Vtxo, 1)
-	go func() {
-		for {
-			select {
-			case <-vtxoCtx.Done():
-				return
-			case event, ok := <-vtxoCh:
-				if !ok {
-					return
-				}
-				if event.Type != sdktypes.VtxosAdded || len(event.Vtxos) == 0 {
-					continue
-				}
-				done <- event.Vtxos[0]
-				return
-			}
-		}
-	}()
-
-	txid, err := client.RedeemNotes(ctx, []string{note})
+	res, err := client.RedeemNotes(ctx, []string{note})
 	require.NoError(t, err)
-	require.NotEmpty(t, txid)
+	require.NotEmpty(t, res.CommitmentTxid)
 
-	select {
-	case v := <-done:
-		return v
-	case <-vtxoCtx.Done():
-		t.Fatal("faucetOffchain: timed out waiting for VtxosAdded event")
-		return clientTypes.Vtxo{}
-	}
+	require.Eventually(t, func() bool {
+		spendable, _, err := client.ListVtxos(ctx)
+		return err == nil && len(spendable) > 0
+	}, 30*time.Second, 200*time.Millisecond, "faucetOffchain: no spendable vtxo after redeeming note")
 }
 
 func generateNote(t *testing.T, amount uint64) string {
@@ -155,143 +125,28 @@ func faucet(ctx context.Context, address string, amount float64) error {
 
 func sendOffChainToVHTLC(
 	t *testing.T,
-	c arksdk.Wallet,
+	c clientwallet.Wallet,
 	claimAddr string,
 	amount uint64,
 	encodedTapTree []byte,
 	pkt extension.Packet,
 ) {
 	t.Helper()
-	ctx := t.Context()
-
-	cfgData, err := c.GetConfigData(ctx)
-	require.NoError(t, err)
-
-	spendable, _, err := c.ListVtxos(ctx)
-	require.NoError(t, err)
-
-	cm := c.ContractManager()
-	var (
-		chosen      clientTypes.Vtxo
-		tapscripts  []string
-		signingKeys map[string]string
-		found       bool
-	)
-	for _, v := range spendable {
-		if v.IsRecoverable() || v.Spent {
-			continue
-		}
-		if v.Amount < amount+cfgData.Dust {
-			continue
-		}
-		contracts, err := cm.GetContracts(ctx, sdkcontract.WithScripts([]string{v.Script}))
-		require.NoError(t, err)
-		if len(contracts) == 0 {
-			continue
-		}
-		handler, err := cm.GetHandler(ctx, contracts[0])
-		require.NoError(t, err)
-		ts, err := handler.GetTapscripts(contracts[0])
-		require.NoError(t, err)
-		keys, err := handler.GetKeyRefs(contracts[0])
-		require.NoError(t, err)
-		chosen = v
-		tapscripts = ts
-		signingKeys = keys
-		found = true
-		break
-	}
-	require.True(t, found, "no spendable VTXO with sufficient amount (need %d)", amount)
-
-	vs, err := script.ParseVtxoScript(tapscripts)
-	require.NoError(t, err)
-	forfeitClosures := vs.ForfeitClosures()
-	require.NotEmpty(t, forfeitClosures)
-	forfeitScript, err := forfeitClosures[0].Script()
-	require.NoError(t, err)
-	leafHash := txscript.NewBaseTapLeaf(forfeitScript).TapHash()
-
-	_, tapTree, err := vs.TapTree()
-	require.NoError(t, err)
-	merkleProof, err := tapTree.GetTaprootMerkleProof(leafHash)
-	require.NoError(t, err)
-	controlBlock, err := txscript.ParseControlBlock(merkleProof.ControlBlock)
-	require.NoError(t, err)
-
-	txidHash, err := chainhash.NewHashFromStr(chosen.Txid)
-	require.NoError(t, err)
-	in := offchain.VtxoInput{
-		Outpoint: &wire.OutPoint{Hash: *txidHash, Index: chosen.VOut},
-		Amount:   int64(chosen.Amount),
-		Tapscript: &waddrmgr.Tapscript{
-			ControlBlock:   controlBlock,
-			RevealedScript: forfeitScript,
-		},
-		RevealedTapscripts: tapscripts,
-	}
 
 	vhtlcArk, err := arklib.DecodeAddressV0(claimAddr)
 	require.NoError(t, err)
 	vhtlcPkScript, err := script.P2TRScript(vhtlcArk.VtxoTapKey)
 	require.NoError(t, err)
 
-	outputs := []*wire.TxOut{{Value: int64(amount), PkScript: vhtlcPkScript}}
-
-	if change := chosen.Amount - amount; change > 0 {
-		changeAddr, err := c.NewOffchainAddress(ctx)
-		require.NoError(t, err)
-		myArk, err := arklib.DecodeAddressV0(changeAddr)
-		require.NoError(t, err)
-		myPkScript, err := script.P2TRScript(myArk.VtxoTapKey)
-		require.NoError(t, err)
-		outputs = append(outputs, &wire.TxOut{Value: int64(change), PkScript: myPkScript})
-	}
-
+	opts := []offchaintx.Option{offchaintx.WithTxOutsTaprootTree(
+		map[string][]byte{hex.EncodeToString(vhtlcPkScript): encodedTapTree},
+	)}
 	if pkt != nil {
-		ext, err := extension.NewExtensionFromPackets(pkt)
-		require.NoError(t, err)
-		extTxOut, err := ext.TxOut()
-		require.NoError(t, err)
-		outputs = append(outputs, extTxOut)
+		opts = append(opts, offchaintx.WithExtraPacket(pkt))
 	}
 
-	arkTx, checkpointTxs, err := offchain.BuildTxs(
-		[]offchain.VtxoInput{in}, outputs, cfgData.CheckpointExitPath(),
-	)
+	_, err = c.SendOffChain(t.Context(), []clientlib.Receiver{{To: claimAddr, Amount: amount}}, opts...)
 	require.NoError(t, err)
-
-	vhtlcIdx := -1
-	for i, out := range arkTx.UnsignedTx.TxOut {
-		if bytes.Equal(out.PkScript, vhtlcPkScript) {
-			vhtlcIdx = i
-			break
-		}
-	}
-	require.GreaterOrEqual(t, vhtlcIdx, 0, "VHTLC output not found in built ark tx")
-	arkTx.Outputs[vhtlcIdx].TaprootTapTree = encodedTapTree
-
-	arkB64, err := arkTx.B64Encode()
-	require.NoError(t, err)
-	signedArk, err := c.Identity().SignTransaction(ctx, arkB64, signingKeys)
-	require.NoError(t, err)
-
-	cpB64s := make([]string, len(checkpointTxs))
-	for i, cp := range checkpointTxs {
-		b64, err := cp.B64Encode()
-		require.NoError(t, err)
-		cpB64s[i] = b64
-	}
-
-	arkTxid, _, serverSignedCps, err := c.Client().SubmitTx(ctx, signedArk, cpB64s)
-	require.NoError(t, err)
-
-	finalCps := make([]string, len(serverSignedCps))
-	for i, cp := range serverSignedCps {
-		sig, err := c.SignTransaction(ctx, cp)
-		require.NoError(t, err)
-		finalCps[i] = sig
-	}
-	require.NoError(t, c.Client().FinalizeTx(ctx, arkTxid, finalCps))
 }
 
 func newEmulatorClient(t *testing.T) emulatorclient.TransportClient {
@@ -327,13 +182,13 @@ type indexerVtxo struct {
 	Amount uint64
 }
 
-func pollForVtxoAt(t *testing.T, ctx context.Context, idx indexer.Indexer, pkScript []byte, timeout time.Duration) indexerVtxo {
+func pollForVtxoAt(t *testing.T, ctx context.Context, idx clientlib.Indexer, pkScript []byte, timeout time.Duration) indexerVtxo {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		resp, err := idx.GetVtxos(ctx,
-			indexer.WithScripts([]string{hex.EncodeToString(pkScript)}),
-			indexer.WithSpendableOnly(),
+			clientlib.WithScripts([]string{hex.EncodeToString(pkScript)}),
+			clientlib.WithSpendableOnly(),
 		)
 		if err == nil && len(resp.Vtxos) > 0 {
 			v := resp.Vtxos[0]

@@ -10,11 +10,10 @@ import (
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
-	"github.com/arkade-os/arkd/pkg/client-lib/indexer"
-	clientTypes "github.com/arkade-os/arkd/pkg/client-lib/types"
-	arksdk "github.com/arkade-os/go-sdk"
+	clientlib "github.com/arkade-os/arkd/pkg/client-lib"
+	clientwallet "github.com/arkade-os/arkd/pkg/client-wallet"
+	"github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -122,7 +121,7 @@ func buildPreimageVTXO(
 ) (string, extension.Packet, []byte) {
 	t.Helper()
 	closure, err := preimage.CovenantClaimClosure(
-		btcutil.Hash160(preimg), receiverPk, serverPub, emulatorPub,
+		address.Hash160(preimg), receiverPk, serverPub, emulatorPub,
 	)
 	require.NoError(t, err)
 	pkt, err := preimage.BuildPacket(preimg, covclaimdPub, receiverPk)
@@ -152,11 +151,11 @@ func freshPreimage(t *testing.T) []byte {
 	return out
 }
 
-func vtxosForScript(t *testing.T, ctx context.Context, c arksdk.Wallet, pk []byte) []clientTypes.Vtxo {
+func vtxosForScript(t *testing.T, ctx context.Context, c clientwallet.Wallet, pk []byte) []clientlib.Vtxo {
 	t.Helper()
 	resp, err := c.Indexer().GetVtxos(ctx,
-		indexer.WithScripts([]string{hex.EncodeToString(pk)}),
-		indexer.WithSpendableOnly(),
+		clientlib.WithScripts([]string{hex.EncodeToString(pk)}),
+		clientlib.WithSpendableOnly(),
 	)
 	require.NoError(t, err)
 	return resp.Vtxos

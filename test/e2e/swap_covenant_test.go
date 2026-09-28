@@ -8,11 +8,11 @@ import (
 	"github.com/arkade-os/arkd/pkg/ark-lib/script"
 	"github.com/arkade-os/arkd/pkg/ark-lib/txutils"
 	"github.com/arkade-os/emulator/pkg/arkade"
+	"github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/arkade-os/covclaimd/pkg/preimage"
@@ -101,7 +101,7 @@ func TestSwapCovenantWithCovclaimdLeafIsClaimable(t *testing.T) {
 		t, preimg, providerPub, cfgData.SignerPubKey, emulatorPub, refundPkScript,
 	)
 	covclaimdLeaf, err := preimage.CovenantClaimClosure(
-		btcutil.Hash160(preimg), providerPkScript, cfgData.SignerPubKey, emulatorPub,
+		address.Hash160(preimg), providerPkScript, cfgData.SignerPubKey, emulatorPub,
 	)
 	require.NoError(t, err)
 	closures = append(closures, covclaimdLeaf)
@@ -127,7 +127,7 @@ func swapCovenantClosures(
 ) []script.Closure {
 	t.Helper()
 
-	condition := swapPreimageCondition(t, btcutil.Hash160(preimg))
+	condition := swapPreimageCondition(t, address.Hash160(preimg))
 
 	refundArkadeScript, err := preimage.EnforcePayTo(refundPkScript)
 	require.NoError(t, err)
