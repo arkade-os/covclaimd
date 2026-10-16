@@ -88,6 +88,9 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 		}).Debug("preimage taptree does not derive this output's pkScript")
 		return nil, false
 	}
+	if c.underfunded(pkt, out, i) {
+		return nil, false
+	}
 
 	return &MatchedClaim{
 		Outpoint: wire.OutPoint{Hash: tx.UnsignedTx.TxHash(), Index: uint32(i)},
@@ -100,6 +103,21 @@ func (c *claimer) matchOutput(tx *psbt.Packet, i int, pkt *ClaimPacket, preimg [
 			PkScript:     expectedPk,
 		},
 	}, true
+}
+
+// underfunded is loud: claiming would publish the preimage for less than the
+// sealer asked, which is how a funder buys it with a dust lockup.
+func (c *claimer) underfunded(pkt *ClaimPacket, out *wire.TxOut, vout int) bool {
+	if !pkt.Underfunds(out.Value) {
+		return false
+	}
+	c.log.WithFields(logrus.Fields{
+		"vout":          vout,
+		"value":         out.Value,
+		"min_amount":    *pkt.MinAmount,
+		"pk_script_hex": hex.EncodeToString(out.PkScript),
+	}).Warn("preimage output carries less than the packet's min_amount, not claiming")
+	return true
 }
 
 func (c *claimer) gateSpendable(ctx context.Context, m *MatchedClaim) (any, bool) {

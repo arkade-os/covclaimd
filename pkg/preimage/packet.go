@@ -16,15 +16,34 @@ const (
 	tlvCiphertext      byte = 0x01
 	tlvArkadeScript    byte = 0x02
 	tlvCovclaimdPubKey byte = 0x03
+	tlvMinAmount       byte = 0x04
 )
 
 // compressedPubKeyLen is the serialized length of the committed covclaimd key.
 const compressedPubKeyLen = 33
 
+const minAmountLen = 8
+
 type ClaimPacket struct {
 	Ciphertext      []byte // encrypted preimage or whatever allowing the claim
 	ArkadeScript    []byte
 	CovclaimdPubKey []byte
+	// MinAmount is the least an output must carry for this packet to claim it.
+	// The sealer authenticates it with the ciphertext, so a funder cannot lower
+	// or strip it. Nil only in packets sealed before the field existed.
+	MinAmount *uint64
+}
+
+// Underfunds reports whether an output of value is below MinAmount.
+func (p *ClaimPacket) Underfunds(value int64) bool {
+	return p.MinAmount != nil && (value < 0 || uint64(value) < *p.MinAmount)
+}
+
+func (p *ClaimPacket) minAmountBytes() []byte {
+	if p.MinAmount == nil {
+		return nil
+	}
+	return binary.BigEndian.AppendUint64(nil, *p.MinAmount)
 }
 
 // AddressedTo reports whether the packet names pub (compressed) as the
@@ -43,7 +62,7 @@ func (p *ClaimPacket) Decrypt(secretKey *btcec.PrivateKey) ([]byte, error) {
 	if _, err := ValidateArkadeScript(p.ArkadeScript); err != nil {
 		return nil, fmt.Errorf("invalid arkade_script: %w", err)
 	}
-	preimg, err := Decrypt(secretKey, p.Ciphertext)
+	preimg, err := DecryptWithAAD(secretKey, p.Ciphertext, p.minAmountBytes())
 	if err != nil {
 		return nil, fmt.Errorf("decrypt preimage: %w", err)
 	}
@@ -74,6 +93,9 @@ func (p *ClaimPacket) Serialize() ([]byte, error) {
 	encodeTLV(buf, tlvCiphertext, p.Ciphertext)
 	encodeTLV(buf, tlvArkadeScript, p.ArkadeScript)
 	encodeTLV(buf, tlvCovclaimdPubKey, p.CovclaimdPubKey)
+	if p.MinAmount != nil {
+		encodeTLV(buf, tlvMinAmount, p.minAmountBytes())
+	}
 	return buf.Bytes(), nil
 }
 
@@ -121,6 +143,14 @@ func DeserializeClaim(data []byte) (*ClaimPacket, error) {
 				)
 			}
 			out.CovclaimdPubKey = val
+		case tlvMinAmount:
+			if len(val) != minAmountLen {
+				return nil, fmt.Errorf(
+					"min_amount TLV (0x04) is %d bytes, want %d", len(val), minAmountLen,
+				)
+			}
+			minAmount := binary.BigEndian.Uint64(val)
+			out.MinAmount = &minAmount
 		}
 	}
 

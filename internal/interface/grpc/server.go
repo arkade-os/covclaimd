@@ -124,8 +124,9 @@ func registerRevealRoutes(mux *http.ServeMux, svc covclaimdv1.RevealServiceServe
 		var body struct {
 			SwapAddress string `json:"swap_address"`
 			Packet      struct {
-				Ciphertext   string `json:"ciphertext"`
-				ArkadeScript string `json:"arkade_script"`
+				Ciphertext   string  `json:"ciphertext"`
+				ArkadeScript string  `json:"arkade_script"`
+				MinAmount    *uint64 `json:"min_amount"`
 			} `json:"packet"`
 			Taptree string `json:"taptree"`
 		}
@@ -145,7 +146,9 @@ func registerRevealRoutes(mux *http.ServeMux, svc covclaimdv1.RevealServiceServe
 		}
 		resp, err := svc.Reveal(r.Context(), &covclaimdv1.RevealRequest{
 			SwapAddress: body.SwapAddress,
-			Packet:      &covclaimdv1.ClaimPacket{Ciphertext: ciphertext, ArkadeScript: arkadeScript},
+			Packet: &covclaimdv1.ClaimPacket{
+				Ciphertext: ciphertext, ArkadeScript: arkadeScript, MinAmount: body.Packet.MinAmount,
+			},
 			Taptree:     body.Taptree,
 		})
 		if err != nil {

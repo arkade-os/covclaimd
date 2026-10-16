@@ -59,3 +59,18 @@ func TestECIES_DifferentEphemeralEachCall(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, a, b, "two encryptions must differ (random ephemeral)")
 }
+
+func TestECIES_ExtraAADMustMatch(t *testing.T) {
+	priv, _ := btcec.NewPrivateKey()
+	blob, err := preimage.EncryptWithAAD(priv.PubKey(), []byte("P"), []byte{1, 2})
+	require.NoError(t, err)
+
+	out, err := preimage.DecryptWithAAD(priv, blob, []byte{1, 2})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("P"), out)
+
+	for name, aad := range map[string][]byte{"absent": nil, "edited": {1, 3}} {
+		_, err := preimage.DecryptWithAAD(priv, blob, aad)
+		assert.Error(t, err, name)
+	}
+}

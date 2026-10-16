@@ -60,7 +60,9 @@ func (h *RevealHandler) Reveal(
 
 	if err := h.submitter.Submit(
 		ctx, *addr, taptree,
-		preimage.ClaimPacket{Ciphertext: cipherText, ArkadeScript: arkadeScript},
+		preimage.ClaimPacket{
+			Ciphertext: cipherText, ArkadeScript: arkadeScript, MinAmount: pkt.MinAmount,
+		},
 	); err != nil {
 		return nil, status.Error(submitErrorCode(err), err.Error())
 	}

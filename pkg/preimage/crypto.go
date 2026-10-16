@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"golang.org/x/crypto/hkdf"
@@ -24,6 +25,12 @@ const (
 )
 
 func Encrypt(recipient *btcec.PublicKey, plaintext []byte) ([]byte, error) {
+	return EncryptWithAAD(recipient, plaintext, nil)
+}
+
+// EncryptWithAAD authenticates extraAAD after the ephemeral key, so the blob
+// opens only under the same extraAAD.
+func EncryptWithAAD(recipient *btcec.PublicKey, plaintext, extraAAD []byte) ([]byte, error) {
 	if recipient == nil {
 		return nil, errors.New("recipient pubkey must not be nil")
 	}
@@ -43,7 +50,7 @@ func Encrypt(recipient *btcec.PublicKey, plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("nonce: %w", err)
 	}
 
-	ct := aead.Seal(nil, nonce, plaintext, ephPub)
+	ct := aead.Seal(nil, nonce, plaintext, slices.Concat(ephPub, extraAAD))
 	out := make([]byte, 0, eciesHeader+len(ct))
 	out = append(out, ephPub...)
 	out = append(out, nonce...)
@@ -52,6 +59,10 @@ func Encrypt(recipient *btcec.PublicKey, plaintext []byte) ([]byte, error) {
 }
 
 func Decrypt(priv *btcec.PrivateKey, blob []byte) ([]byte, error) {
+	return DecryptWithAAD(priv, blob, nil)
+}
+
+func DecryptWithAAD(priv *btcec.PrivateKey, blob, extraAAD []byte) ([]byte, error) {
 	if priv == nil {
 		return nil, errors.New("priv must not be nil")
 	}
@@ -71,7 +82,8 @@ func Decrypt(priv *btcec.PrivateKey, blob []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	pt, err := aead.Open(nil, nonce, ct, ephPubBytes)
+	// Concat copies: appending to ephPubBytes, a sub-slice of blob, would overwrite the nonce.
+	pt, err := aead.Open(nil, nonce, ct, slices.Concat(ephPubBytes, extraAAD))
 	if err != nil {
 		return nil, fmt.Errorf("aead open: %w", err)
 	}

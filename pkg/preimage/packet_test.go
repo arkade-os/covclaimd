@@ -1,9 +1,11 @@
 package preimage_test
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/arkade-os/arkd/pkg/ark-lib/extension"
@@ -214,6 +216,60 @@ func TestFindClaim_NotFound(t *testing.T) {
 	found, err := preimage.FindClaim(ext)
 	require.NoError(t, err)
 	require.Nil(t, found)
+}
+
+func TestClaimPacket_MinAmountRoundTrips(t *testing.T) {
+	minAmount := uint64(50_000)
+	raw, err := (&preimage.ClaimPacket{
+		Ciphertext:      []byte{0xaa},
+		ArkadeScript:    []byte{0x51},
+		CovclaimdPubKey: fromHex(t, generatorPubKeyHex),
+		MinAmount:       &minAmount,
+	}).Serialize()
+	require.NoError(t, err)
+	assert.Equal(t,
+		"010001aa02000151030021"+generatorPubKeyHex+"040008000000000000c350",
+		hex.EncodeToString(raw))
+
+	out, err := preimage.DeserializeClaim(raw)
+	require.NoError(t, err)
+	require.NotNil(t, out.MinAmount)
+	assert.Equal(t, minAmount, *out.MinAmount)
+}
+
+func TestDeserializeClaim_RejectsAMinAmountThatIsNotEightBytes(t *testing.T) {
+	_, err := preimage.DeserializeClaim(fromHex(t, "010001aa020001510400040000c350"))
+	require.ErrorContains(t, err, "min_amount TLV (0x04) is 4 bytes, want 8")
+}
+
+// Sealed by @arkade-os/swap with its pinned test entropy: covclaimd key 0x22×32,
+// ephemeral key 0x11×32, nonce 0x0a×12, P = 0x07×32, min_amount 50000.
+const sdkAmountBoundPacketHex = "01005d" +
+	"034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa0a0a0a0a0a0a0a0a0a0a0a0a" +
+	"14ec375e22b0f016fb127e4740e9599f6b07d04bd040751d9fade4c5427b97870d1f1c805165f490f5a6cfcabdb4f346" +
+	"03002102466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27" +
+	"040008000000000000c350"
+
+func TestClaimPacket_OpensTheSDKsAmountBoundPacket(t *testing.T) {
+	priv, _ := btcec.PrivKeyFromBytes(bytes.Repeat([]byte{0x22}, 32))
+	arkadeScript, err := preimage.EnforcePayTo(fromHex(t, "5120"+strings.Repeat("ab", 32)))
+	require.NoError(t, err)
+	body := append(fromHex(t, sdkAmountBoundPacketHex), 0x02, 0x00, byte(len(arkadeScript)))
+	pkt, err := preimage.DeserializeClaim(append(body, arkadeScript...))
+	require.NoError(t, err)
+
+	got, err := pkt.Decrypt(priv)
+	require.NoError(t, err)
+	assert.Equal(t, bytes.Repeat([]byte{0x07}, 32), got)
+	require.NotNil(t, pkt.MinAmount)
+	assert.Equal(t, uint64(50_000), *pkt.MinAmount)
+
+	edited := uint64(1)
+	for name, minAmount := range map[string]*uint64{"edited": &edited, "stripped": nil} {
+		pkt.MinAmount = minAmount
+		_, err := pkt.Decrypt(priv)
+		assert.Error(t, err, name)
+	}
 }
 
 func loadClaimPacketFixtures(t *testing.T) claimPacketFixtures {

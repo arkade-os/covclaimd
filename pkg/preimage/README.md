@@ -33,17 +33,24 @@ A tx output is claimed when **all** of the following hold:
    already point-to-point.
 2. `ValidateArkadeScript(packet.ArkadeScript)` passes — only
    `EnforcePayTo(receiverPk)` byte sequences are accepted.
-3. `Decrypt(secretKey, packet.Ciphertext)` yields a 32-byte preimage.
+3. `Decrypt(secretKey, packet.Ciphertext)` yields a 32-byte preimage. When the
+   packet carries `min_amount` (`0x04`), the AEAD's additional data is
+   `ephPub ‖ u64be(min_amount)`, so a packet whose amount was lowered or
+   stripped does not open.
 4. The output's `POutput.TaprootTapTree` (BIP-371) decodes as a
    `TapscriptsVtxoScript` containing a `ConditionMultisigClosure` whose two
    keys are exactly `(signerPubKey, emulatorTweakedKey(arkadeScript))` and
    whose condition is `SIZE 32 EQUALVERIFY HASH160(preimage) EQUAL` for the
    decrypted preimage,
    and the output's pkScript equals the P2TR derived from that taptree.
-5. The funding VTXO is still spendable per the indexer
+5. The output carries at least `min_amount`, when the packet names one. This
+   holds on both paths. Claiming publishes the preimage, so a funder that could
+   get a dust lockup claimed would learn it for dust and could collect the full
+   amount elsewhere with it.
+6. The funding VTXO is still spendable per the indexer
    (`GetVtxos(WithScripts, WithSpendableOnly)`).
 
-Any failure is a silent miss (debug log at most).
+Any failure is a silent miss (debug log at most), except step 5, which warns.
 
 Produced intent: `MatchedClaim{Outpoint, Amount, Credentials{Preimage, ArkadeScript, Taptree, PkScript}}`.
 
@@ -118,7 +125,7 @@ gRPC + HTTP so makers can encrypt preimages against the right keys.
 - `plugin.go` — `Config`, `NewPlugin`, encrypted-path `Filter`/`Match`/`Solve`.
 - `reveal_plugin.go` — `RevealPlugin`: `Submit` (write side, RevealService backend) plus `Match`/`Solve` over its in-memory registration map (process-local; lost on restart, makers re-submit). `Submit` accepts a packet only if the supplied taptree hashes to the swap address and holds the claim closure for that arkade script and preimage (`bindsToAddress`), so a registration can't be made for someone else's address. `matchRegistered` then matches on pkScript alone and builds the claim from the registered taptree. 15min TTL, 10k cap (`ErrRegistryFull`).
 - `claimer.go` — shared core: packet validation, output matching, spendability gate, claim submission.
-- `packet.go` — `ClaimPacket` TLV codec (`PacketType = 0x04`), `AddressedTo` / `SealedToAnother`, and `FindClaim`. TLVs are `0x01` ciphertext, `0x02` arkade_script, `0x03` covclaimd_pub_key, each with a 1-byte type and a 2-byte big-endian length. `0x01` and `0x02` are required both ways; `0x03` is required to write and optional to read, so packets in the older two-TLV shape still parse and still claim. When present it must be exactly 33 bytes.
+- `packet.go` — `ClaimPacket` TLV codec (`PacketType = 0x04`), `AddressedTo` / `SealedToAnother`, and `FindClaim`. TLVs are `0x01` ciphertext, `0x02` arkade_script, `0x03` covclaimd_pub_key, `0x04` min_amount, each with a 1-byte type and a 2-byte big-endian length. `0x01` and `0x02` are required both ways; `0x03` is required to write and optional to read, so packets in the older two-TLV shape still parse and still claim. When present it must be exactly 33 bytes. `0x04` is optional both ways, 8 bytes big-endian sats, and authenticated by the ciphertext (step 3).
 - `claim.go` — `MatchedClaim`, `BuildClaim`, closure-search helpers.
 - `contract.go` — `EnforcePayTo`, `CovenantClaimClosure`, `ValidateArkadeScript`, emulator key tweak.
 - `crypto.go` — `Encrypt`/`Decrypt`: ECIES over secp256k1, HKDF-SHA256 → AES-256-GCM.
