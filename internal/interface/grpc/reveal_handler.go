@@ -40,6 +40,11 @@ func (h *RevealHandler) Reveal(
 	if len(arkadeScript) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "arkade_script must not be empty")
 	}
+	// A zero bound means nothing, yet it changes the AEAD data: a sealer meaning "none" would
+	// produce a packet nothing without the field can open. Omit it instead.
+	if pkt.MinAmount != nil && *pkt.MinAmount == 0 {
+		return nil, status.Error(codes.InvalidArgument, "min_amount must be positive; omit it for an unbound packet")
+	}
 
 	addr, err := arklib.DecodeAddressV0(req.GetSwapAddress())
 	if err != nil {

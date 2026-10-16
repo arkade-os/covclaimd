@@ -16,7 +16,7 @@ const (
 	tlvCiphertext      byte = 0x01
 	tlvArkadeScript    byte = 0x02
 	tlvCovclaimdPubKey byte = 0x03
-	tlvMinAmount       byte = 0x04
+	tlvMinAmount       byte = 0x04 // a TLV inside the packet body, not PacketType
 )
 
 // compressedPubKeyLen is the serialized length of the committed covclaimd key.
