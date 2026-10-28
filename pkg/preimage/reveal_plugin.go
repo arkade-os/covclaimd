@@ -179,7 +179,7 @@ func (p *RevealPlugin) matchRegistered(tx *psbt.Packet) (*MatchedClaim, bool) {
 		p.mu.RLock()
 		reg, ok := p.packets[hex.EncodeToString(out.PkScript)]
 		p.mu.RUnlock()
-		if !ok {
+		if !ok || p.underfunded(&reg.packet, out, i) {
 			continue
 		}
 		preimg, ok := p.decodePacket(&reg.packet)

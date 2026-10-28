@@ -99,7 +99,11 @@ output's taptree, and the bot binds all of it together before accepting:
   `(serverPubKey, emulatorTweakedKey(arkade_script))`;
 - that closure's condition must be `SIZE 32 EQUALVERIFY HASH160(preimage) EQUAL`
   for the preimage decrypted from `ciphertext`, which must be 32 bytes;
-- `arkade_script` must be a canonical `EnforcePayTo(receiver)`.
+- `arkade_script` must be a canonical `EnforcePayTo(receiver)`;
+- `min_amount`, when the ciphertext was sealed with one, must be sent with it.
+  It is authenticated data, so leaving it out or changing it fails decryption.
+  The address is then claimed only from an output carrying at least that many
+  sats.
 
 Anything that fails is rejected with `400 / InvalidArgument`. Because a packet
 is only accepted when it provably belongs to the address it names, a third
@@ -123,7 +127,8 @@ POST /v1/reveal
   "swap_address": "<bech32m Arkade address of the VHTLC funding output>",
   "packet": {
     "ciphertext": "<base64 (standard, padded) ECIES(covclaimdPub, 32-byte preimage)>",
-    "arkade_script": "<base64 (standard, padded) EnforcePayTo(receiver) bytes>"
+    "arkade_script": "<base64 (standard, padded) EnforcePayTo(receiver) bytes>",
+    "min_amount": 50000
   },
   "taptree": "<hex-encoded BIP-371 taptree of the funding output>"
 }

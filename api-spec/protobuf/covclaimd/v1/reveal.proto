@@ -20,6 +20,10 @@ service RevealService {
 message ClaimPacket {
   bytes ciphertext = 1;
   bytes arkade_script = 2;
+  // Sats; the TLV packet's 0x04. Set exactly when the ciphertext was sealed
+  // with it, since it is authenticated data: the swap address is claimed only
+  // from an output carrying at least this much.
+  optional uint64 min_amount = 3;
 }
 
 message RevealRequest {
