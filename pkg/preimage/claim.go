@@ -173,7 +173,7 @@ func findClaimClosure(
 			continue
 		}
 		conditionMatches++
-		if hasExactlyTwoKeys(cmc.PubKeys, serverPubKey, expectedTweaked) {
+		if HasExactlyTwoKeys(cmc.PubKeys, serverPubKey, expectedTweaked) {
 			return cmc, nil
 		}
 	}
@@ -199,7 +199,13 @@ func findClaimClosure(
 	}
 }
 
-func hasExactlyTwoKeys(pubKeys []*btcec.PublicKey, a, b *btcec.PublicKey) bool {
+// HasExactlyTwoKeys reports whether pubKeys is the set {a, b} in either
+// order. Order-independent on purpose: which position a key lands in is an
+// accident of how a closure's builder happened to emit it, not a property
+// worth depending on — exported so pkg/refund's FindRefundClosure can match
+// the same way rather than hand-rolling a second, order-sensitive
+// comparison that could drift from this one.
+func HasExactlyTwoKeys(pubKeys []*btcec.PublicKey, a, b *btcec.PublicKey) bool {
 	if len(pubKeys) != 2 {
 		return false
 	}
